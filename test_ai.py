@@ -7,7 +7,6 @@ MODEL_NAME="gpt-4o-mini"
 # LLM API Call
 def call_llm(messages, model):
     try:
-        # raise Exception("mock API failure")
         response = client.chat.completions.create(
             model=model,
             messages=messages
