@@ -75,7 +75,7 @@ User Input
 
 ## Future Improvements
 
-- LLM powered safety filter
+- LLM powered safety filter (optional)
 - Add RAG (retrieval-based memory)
 - Structured output
 - UI (Streamlit)
