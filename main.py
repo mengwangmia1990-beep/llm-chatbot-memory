@@ -2,16 +2,21 @@ import llm
 import safety
 import memory
 import config
+import rag
 
+# global system prompt
 system_message = {
-    "role": "system", 
-    "content":"""
-        You are a lifestyle chatbot. 
-        Answer only with:
-        - Yes
-        - No
-        
-        Strictly prohibited from outputting any other content, including explanations, newlines, spaces, and punctuation.
+    "role": "system",
+    "content": """
+        You are a helpful and reliable assistant.
+
+        When answering:
+        - Be clear, concise, and direct
+        - If relevant knowledge is provided, use it as the primary source
+        - Prefer knowledge-based answers over general knowledge when available
+        - Do not invent or hallucinate any information
+
+        Maintain a natural and conversational tone.
         """
     }
 
@@ -19,6 +24,8 @@ def main():
     messages = [
         system_message
     ]
+
+    knowledge = rag.load_knowledge()
 
     print("Put your questions below:") # chatbot title
     while True:
@@ -44,7 +51,34 @@ def main():
             {"role": "user", "content": user_input}
         )
 
-        reply = llm.call_llm(messages)
+        # Before calling LLM, search knowledge first
+        top_chunks = rag.retrieve(user_input, knowledge)
+
+        # if found relevant knowledge
+        if top_chunks:
+            rag_message = [{
+                "role": "user",
+                "content": f"""
+                    Use the following knowledge to answer the question.
+
+                    Rules:
+                    - Use the provided knowledge as the primary source
+                    - If the answer is not in the knowledge, say "I don't know"
+                    - Do not invent or hallucinate any information
+
+                    Knowledge: 
+                    {chr(10).join(top_chunks)}
+
+                    Question:
+                    {user_input}
+                """
+            }]
+            # 临时加一轮, 不永久写入message对话
+            reply = llm.call_llm(messages + rag_message)
+        else:
+            # Call LLM model and collect response
+            reply = llm.call_llm(messages)
+
         if reply is None:
             messages.pop() # rollback没成功的用户问题
             continue
@@ -55,6 +89,7 @@ def main():
         )
         
         # Context window management
+        print(len(messages))
         if len(messages) > config.MAX_MESSAGES + 1:
             try:
                 if memory.has_summary(messages):

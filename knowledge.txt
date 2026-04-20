@@ -1,0 +1,4 @@
+Return Policy: Customers can return items within 7 days with a receipt. 
+Shipping Policy: Standard shipping takes 3-5 business days.
+Membership Policy: Members get a 10% discount.   
+Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed.
