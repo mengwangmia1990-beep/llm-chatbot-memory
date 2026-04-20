@@ -12,6 +12,6 @@ def call_llm(messages, model=config.MODEL_NAME):
         )
         return response.choices[0].message.content
     except Exception as e:
-        print("AI: 模型调用失败, 请稍后重试")
+        print("AI: Failed to call LLM. Please retry later.")
         print("Error", e)
         return None

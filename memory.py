@@ -6,18 +6,33 @@ def summarize(old_summary, new_messages):
         summary_prompt = [
             {
                 "role": "system",
-                "content": "你是一个对话摘要助手。请根据旧摘要和新增对话，生成更新后的中文摘要。保留稳定的重要信息，用户需求和上下文。合并新增信息，避免重复，不要捏造。"
+                "content": """
+                You are a conversation summarization assistant.
+                
+                Task:
+                Given a previous summary and new conversation messages, generate an updated summary.
+
+                Requirements:
+                - Preserve important long-term information (e.g., user preferences, needs, background)
+                - Incorporate key information from the new conversation
+                - Avoid redundancy by merging overlapping information
+                - Do not invent or hallucinate any information
+                - Keep the summary clear and concise
+
+                Output:
+                Return only the final updated summary.
+                """
             },
             {
                 "role": "user",
                 "content": f"""
-                这是旧摘要:
+                Old summary:
                 {old_summary}
 
-                这是新增对话:
+                New conversations:
                 {new_messages}
 
-                请输出更新后的摘要。
+                Please output the final updated summary.
                 """
             }
         ]
@@ -25,7 +40,20 @@ def summarize(old_summary, new_messages):
         summary_prompt = [
             {
                 "role": "system",
-                "content": "请以简洁中文总结以下对话历史。保留用户关键信息，用户需求和上下文。不可捏造信息。"
+                "content": """
+                You are a conversation summarization assistant.
+
+                Task:
+                Summarize the following conversation.
+
+                Requirements:
+                - Keep important user information, needs, and context
+                - Do not invent or hallucinate any information
+                - Keep the summary concise and clear
+
+                Output:
+                Return only the summary.
+                """
             },
             {
                 "role": "user",

@@ -1,15 +1,15 @@
 #RULE-BASED POLICY
 unsafe_keywords = {
     "self-harm": {
-        "keyword": ["自杀", "想死", "自我了断", "轻生"],
+        "keyword": ["sucicide", "end myself", "kill myself"],
         "action": "support"
     },
     "violence": {
-        "keyword": ["杀", "杀人", "伤害"],
+        "keyword": ["kill", "kill someone", "harm"],
         "action": "block"
     },
     "sexual": {
-        "keyword": ["强奸", "色情"],
+        "keyword": ["rape", "porn"],
         "action": "block"
     }
 }
