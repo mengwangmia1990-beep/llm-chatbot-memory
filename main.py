@@ -52,10 +52,10 @@ def main():
         )
 
         # Before calling LLM, search knowledge first
-        top_chunks = rag.retrieve(user_input, knowledge)
+        result = rag.retrieve(user_input, knowledge)
 
         # if found relevant knowledge
-        if top_chunks:
+        if result["use_rag"]:
             rag_message = [{
                 "role": "user",
                 "content": f"""
@@ -67,7 +67,7 @@ def main():
                     - Do not invent or hallucinate any information
 
                     Knowledge: 
-                    {chr(10).join(top_chunks)}
+                    {"\n\n".join(result["top_chunks"])}
 
                     Question:
                     {user_input}

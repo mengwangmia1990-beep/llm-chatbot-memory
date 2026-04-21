@@ -1,11 +1,11 @@
 # rag.py
+import config
 
 # Load and clean knowledge data
 def load_knowledge(filepath="knowledge.txt"):
     with open(filepath, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
-    # 去掉空行和首尾空格
     knowledge = []
     for line in lines:
         cleaned = line.strip()
@@ -14,24 +14,51 @@ def load_knowledge(filepath="knowledge.txt"):
     return knowledge
 
 
+def calculate_score(query_words, chunk_words):
+    # scoring strategy: count query word overlap in chunk
+    query_set = set(query_words)
+    chunk_set = set(chunk_words)
+
+    if not query_set:
+        return 0.0
+    
+    overlap = query_set & chunk_set
+    overlap_ratio = len(overlap) / len(query_set)
+
+    return overlap_ratio
+
+
 def retrieve(query, knowledge, top_k=2):
-    query_words = query.lower().split()
+    query_words = query.lower().split() # query preprocessing
     scored_chunks = []
 
     for chunk in knowledge:
-        score = 0
-        chunk_lower = chunk.lower()
+        chunk_words = chunk.lower().split() # chunk preprocessing
+        chunk_score = calculate_score(query_words, chunk_words)
+        scored_chunks.append((chunk, chunk_score))
 
-        for word in query_words:
-            if word in chunk_lower:
-                score += 1
+    # Sort
+    scored_chunks.sort(reverse=True, key=lambda x: x[1])
 
-        if score > 0:
-            scored_chunks.append((score, chunk))
+    # Select top_k chunks
+    candidate_chunks = scored_chunks[:top_k]
 
-    # 按 score 从大到小排序
-    scored_chunks.sort(reverse=True, key=lambda x: x[0])
+    # Threshold Gating
+    top_scores = [score for chunk, score in candidate_chunks]
+    top_chunks = [chunk for chunk, score in candidate_chunks]
 
-    # 只取前 top_k 条 chunk
-    top_chunks = [chunk for score, chunk in scored_chunks[:top_k]]
-    return top_chunks
+    if top_scores:
+        top_score = top_scores[0]
+    else:
+        top_score = 0
+    
+    use_rag = False
+    if top_scores and top_scores[0] >= config.RAG_RELEVANCE_THRESHOLD:
+        use_rag = True
+
+    return {
+        "top_chunks": top_chunks,
+        "top_scores": top_scores,
+        "top_score": top_score,
+        "use_rag": use_rag
+    }
