@@ -40,11 +40,11 @@ The second system message stores a summary of the conversation history.
 
 User Input  
 → Safety Check  
-→ Append to Message History
-→ RAG Retrieval (optional)
-→ Prompt Construction (history + RAG context) (optional)
+→ Append to Message History  
+→ RAG Retrieval (optional)  
+→ Prompt Construction (history + RAG context) (optional)  
 → LLM Call  
-→ Append Assistant Response
+→ Append Assistant Response  
 → Memory Update  
 → Optional Summarization  
 
