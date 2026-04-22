@@ -25,11 +25,14 @@ def main():
         system_message
     ]
 
+    # load knowledge
     knowledge = rag.load_knowledge()
 
-    print("Put your questions below:") # chatbot title
+    print("Put your questions below:")
     while True:
-        user_input = input("your question: ").strip() # collect user input from terminal
+         # collect user input from terminal
+        user_input = input("your question: ").strip()
+        
         if not user_input:
             print("Please enter a question:")
             continue
@@ -52,6 +55,7 @@ def main():
         )
 
         reply = generate_reply(user_input, knowledge, messages)
+
         if reply is None:
             messages.pop() # rollback没成功的用户问题
             continue
@@ -61,58 +65,62 @@ def main():
             {"role": "assistant", "content": reply}
         )
         
-        # Context window management
-        print(len(messages))
-        if len(messages) > config.MAX_MESSAGES + 1:
-            try:
-                if memory.has_summary(messages):
-                    # system
-                    # old summary
-                    # chats need to be summarized
-                    # recent chats need to be saved
-
-                    old_summary = messages[1].get("content")
-                    chats_to_be_summarized = messages[2:-config.SHORT_TERM_MESSAGES]
-                    summary = memory.summarize(old_summary, chats_to_be_summarized)
-                else:
-                    # system
-                    # chats need to be summarized
-                    # chats need to be saved
-
-                    summary = memory.summarize(None, messages[1:-config.SHORT_TERM_MESSAGES])
-            except Exception as e:
-                print("AI: Failed to generate summary")
-                print("Error", e)
-                summary = None
-
-            # Construct message with summary
-            if summary is not None:
-                summary_message = {
-                    "role": "system",
-                    "type": "summary",
-                    "content": f"This is summarized history chats: {summary}"
-                    }
-                
-                short_term_message = messages[-config.SHORT_TERM_MESSAGES:]
-
-                messages = [
-                    system_message,
-                    summary_message
-                ]
-
-                messages.extend(short_term_message)
-            else:
-                print("AI: History summary generation failed. Degrading to maintain only the most recent conversation rounds for continued operation.")
-                # 这里，如果只打印不做处理，message会持续增长，最终导致latency增加，甚至超过context limit.
-                # 需要fallback plan degredation 到维持最近几轮对话
-                if memory.has_summary(messages):
-                    messages = [system_message, messages[1]] + messages[-config.SHORT_TERM_MESSAGES:]
-                else:
-                    messages = [system_message] + messages[-config.SHORT_TERM_MESSAGES:]
+        # context window management
+        messages = context_management(messages)
 
         print("AI: ", reply)
         print(messages)
         print("==========================================================================")
+
+def context_management(messages):
+    if len(messages) > config.MAX_MESSAGES + 1:
+        try:
+            if memory.has_summary(messages):
+                # system
+                # old summary
+                # chats need to be summarized
+                # recent chats need to be saved
+
+                old_summary = messages[1].get("content")
+                chats_to_be_summarized = messages[2:-config.SHORT_TERM_MESSAGES]
+                summary = memory.summarize(old_summary, chats_to_be_summarized)
+            else:
+                # system
+                # chats need to be summarized
+                # chats need to be saved
+
+                summary = memory.summarize(None, messages[1:-config.SHORT_TERM_MESSAGES])
+        except Exception as e:
+            print("AI: Failed to generate summary")
+            print("Error", e)
+            summary = None
+
+        # Construct message with summary
+        if summary is not None:
+            summary_message = {
+                "role": "system",
+                "type": "summary",
+                "content": f"This is summarized history chats: {summary}"
+                }
+            
+            short_term_message = messages[-config.SHORT_TERM_MESSAGES:]
+
+            messages = [
+                system_message,
+                summary_message
+            ]
+
+            messages.extend(short_term_message)
+        else:
+            print("AI: History summary generation failed. Degrading to maintain only the most recent conversation rounds for continued operation.")
+            # 这里，如果只打印不做处理，message会持续增长，最终导致latency增加，甚至超过context limit.
+            # 需要fallback plan degredation 到维持最近几轮对话
+            if memory.has_summary(messages):
+                messages = [system_message, messages[1]] + messages[-config.SHORT_TERM_MESSAGES:]
+            else:
+                messages = [system_message] + messages[-config.SHORT_TERM_MESSAGES:]
+
+    return messages
 
 def generate_reply(user_input, knowledge, messages):
     result = rag.retrieve(user_input, knowledge)
