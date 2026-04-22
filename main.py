@@ -51,34 +51,7 @@ def main():
             {"role": "user", "content": user_input}
         )
 
-        # Before calling LLM, search knowledge first
-        result = rag.retrieve(user_input, knowledge)
-
-        # if found relevant knowledge
-        if result["use_rag"]:
-            rag_message = [{
-                "role": "user",
-                "content": f"""
-                    Use the following knowledge to answer the question.
-
-                    Rules:
-                    - Use the provided knowledge as the primary source
-                    - If the answer is not in the knowledge, say "I don't know"
-                    - Do not invent or hallucinate any information
-
-                    Knowledge: 
-                    {"\n\n".join(result["top_chunks"])}
-
-                    Question:
-                    {user_input}
-                """
-            }]
-            # 临时加一轮, 不永久写入message对话
-            reply = llm.call_llm(messages + rag_message)
-        else:
-            # Call LLM model and collect response
-            reply = llm.call_llm(messages)
-
+        reply = generate_reply(user_input, knowledge, messages)
         if reply is None:
             messages.pop() # rollback没成功的用户问题
             continue
@@ -140,6 +113,38 @@ def main():
         print("AI: ", reply)
         print(messages)
         print("==========================================================================")
+
+def generate_reply(user_input, knowledge, messages):
+    result = rag.retrieve(user_input, knowledge)
+    if result["use_rag"]:
+        rag_prompt = build_rag_messages(result, user_input)
+        # 临时加一轮, 不永久写入message对话
+        response = llm.call_llm(messages + rag_prompt)
+    else:
+        # Call LLM model and collect response
+        response = llm.call_llm(messages)
+
+    return response
+
+def build_rag_messages(result, user_input):
+    prompt = [{
+        "role": "user",
+        "content": f"""
+            Use the following knowledge to answer the question.
+
+            Rules:
+            - Use the provided knowledge as the primary source
+            - If the answer is not in the knowledge, say "I don't know"
+            - Do not invent or hallucinate any information
+
+            Knowledge: 
+            {"\n\n".join(result["top_chunks"])}
+
+            Question:
+            {user_input}
+        """
+    }]
+    return prompt
 
 if __name__ == "__main__":
     main()
