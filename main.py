@@ -3,6 +3,8 @@ import safety
 import memory
 import config
 import rag
+import json
+import os
 
 # global system prompt
 system_message = {
@@ -54,7 +56,7 @@ def main():
             {"role": "user", "content": user_input}
         )
 
-        reply = generate_reply(user_input, knowledge, messages)
+        reply, rag_result = generate_reply(user_input, knowledge, messages)
 
         if reply is None:
             messages.pop() # rollback没成功的用户问题
@@ -68,9 +70,36 @@ def main():
         # context window management
         messages = context_management(messages)
 
+        # set trace and output to json file for observation
+        set_trace(user_input, rag_result, reply)
+
         print("AI: ", reply)
-        print(messages)
         print("==========================================================================")
+
+def set_trace(user_input, result, reply):
+    LOG_DIR = config.LOG_DIR
+    LOG_FILE = os.path.join(LOG_DIR, config.TRACE_FILE_NAME)
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+    trace = {
+        "query": user_input,
+        "retrieval": {
+            "use_rag": result["use_rag"],
+            "top_chunks": result["top_chunks"],
+            "top_chunk": result["top_chunks"][0],
+            "top_scores": result["top_scores"],
+            "top_score": result["top_score"],
+            "threshold": config.RAG_RELEVANCE_THRESHOLD
+        },
+        "response": {
+            "reply": reply,
+            "mode": "rag" if result["use_rag"] else "llm"
+        }
+    }
+    
+    # output metrics
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(trace, ensure_ascii=False) + "\n")
 
 def context_management(messages):
     if len(messages) > config.MAX_MESSAGES + 1:
@@ -132,7 +161,7 @@ def generate_reply(user_input, knowledge, messages):
         # Call LLM model and collect response
         response = llm.call_llm(messages)
 
-    return response
+    return response, result
 
 def build_rag_messages(result, user_input):
     prompt = [{
