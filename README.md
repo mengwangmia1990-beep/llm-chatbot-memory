@@ -1,18 +1,28 @@
-# AI Conversational Assistant with Memory & Safety
+# AI Conversational Assistant with Memory, Safety & Hybrid RAG
 
 ## Overview
-This project is a CLI-based chatbot powered by the OpenAI API. 
-It supports multi-turn conversation with short-term and summarized long-term memory, basic rule-based safety filtering, and a retrieval-augmented generation (RAG) pipeline that injects relevant knowledge into the prompt to produce grounded responses.
+This project is a CLI-based conversational assistant powered by the OpenAI API.  
+It supports multi-turn dialogue with hybrid memory (short-term + summarized long-term), rule-based safety filtering, and a lightweight Retrieval-Augmented Generation (RAG) pipeline.
+
+The system follows a **hybrid answering strategy**:
+- When relevant knowledge is retrieved, responses are grounded using RAG
+- Otherwise, the system falls back to the base LLM to provide general answers
+
+---
 
 ## Key Features
 
-- Multi-turn conversation using LLM
-- Context window management via summarization-based memory
-- Token-efficient memory design (hybrid short-term + long-term memory)
-- Retrieval-Augmented Generation (RAG) for knowledge-grounded responses
-- Conditional context injection without polluting conversation history
+- Multi-turn conversation with LLM
+- Hybrid memory (short-term + long-term summarized memory)
+- Context window management with summarization
+- Retrieval-Augmented Generation (RAG)
+- Conditional knowledge injection (non-persistent)
+- Hybrid answering (RAG + fallback LLM)
 - Rule-based safety filtering
-- Basic error handling
+- Basic failure handling (rollback mechanism)
+- Observability via structured trace logging (JSONL)
+
+---
 
 ## System Design
 
@@ -20,70 +30,143 @@ It supports multi-turn conversation with short-term and summarized long-term mem
 
 ```json
 {
-    "role": "system",
-    "content": "Instructions, rules, and context"
+  "role": "system",
+  "content": "Instructions, rules, and context"
 },
-{  
-    "role": "user",
-    "content": "User input."
+{
+  "role": "user",
+  "content": "User input"
 },
-{  
-    "role": "assistant",
-    "content": "Model-generated response"
+{
+  "role": "assistant",
+  "content": "Model response"
 }
 ```
-In this project, a conversation may contain multiple system messages.  
-The first system message defines the overall instructions, rules, and context.  
-The second system message stores a summary of the conversation history.
+
+- The first system message defines global behavior  
+- The second system message stores summarized conversation history  
+
+---
 
 ### 2. Conversation Flow
 
 User Input  
 → Safety Check  
 → Append to Message History  
-→ RAG Retrieval (optional)  
-→ Prompt Construction (history + RAG context) (optional)  
+→ Retrieval (RAG decision)  
+→ Prompt Construction (optional RAG context injection)  
 → LLM Call  
 → Append Assistant Response  
-→ Memory Update  
+→ Context Window Management  
 → Optional Summarization  
 
-### 3. RAG Retrieval (TODO)
+---
 
-### 4. Memory Management
-#### Hybrid Memory
-- *Short-term memory*: recent messages
-- *Long-term memory*: summary stored as system message
+### 3. Retrieval-Augmented Generation (RAG)
 
-#### Optional Summarization
-- Summarization triggered when context window exceeds threshold
-- LLM modernized summarization
+- Current implementation uses keyword-based scoring (token overlap)
+- Top-k chunks are selected and injected into the prompt
+- Threshold-based gating determines whether to use RAG
 
-#### Optimmization:
-- Avoid repeatedly summarizing existing summary to prevent information loss and over-abstraction
-- Preserve recent short-term raw messages to maintain recency and accuracy
-- Summarize intermediate messages to reduce context length and improve token efficiency
+#### Known Limitations
 
-### 5. Fallback Degredation
-#### Enable grace degradation when summary generation fails
-- If a previous summary exists, preserve the system message, the existing summary, and the most recent chat history as the new context window.
-- If no summary exists, preserve the system message and the most recent chat history.
+- Ranking instability for short or ambiguous queries  
+- Lexical matching struggles with semantic similarity  
+- Top-k may include noisy or partially relevant chunks  
 
+#### Key Insight
+
+Even when the correct chunk appears in top-k, the model may:
+- Recover the correct answer  
+- Fail due to noisy context  
+- Or respond conservatively ("I don't know")  
+
+---
+
+### 4. Hybrid Answering Strategy
+
+The system dynamically routes responses:
+
+- **RAG mode (`mode="rag"`)**
+  - Triggered when relevant knowledge is detected
+  - Uses retrieved context to produce grounded responses
+
+- **Fallback mode (`mode="llm"`)**
+  - Triggered when no relevant knowledge is found
+  - Uses base LLM to answer general questions
+
+---
+
+### 5. Memory Management
+
+#### Hybrid Memory Design
+
+- Short-term memory: recent conversation messages  
+- Long-term memory: summarized history stored as system message  
+
+#### Summarization Strategy
+
+- Triggered when context exceeds threshold  
+- Only intermediate messages are summarized  
+- Recent messages are preserved for recency  
+
+#### Optimization
+
+- Avoid re-summarizing existing summaries  
+- Preserve important context while reducing token usage  
+
+---
 
 ### 6. Failure Handling
 
-- API failure → rollback user message (messages.pop())
+- API failure → rollback user message  
+- Summarization failure → fallback to truncated recent history  
 
+---
+
+### 7. Observability (Trace Logging)
+
+Each interaction is logged as structured JSON (JSONL format):
+
+```json
+{
+  "query": "...",
+  "retrieval": {
+    "use_rag": true,
+    "top_chunks": [...],
+    "top_scores": [...],
+    "threshold": ...
+  },
+  "response": {
+    "answer": "...",
+    "mode": "rag"
+  }
+}
+```
+
+This enables:
+
+- Debugging retrieval quality  
+- Analyzing model behavior  
+- Supporting manual and automated evaluation  
+
+---
 
 ## Why This Design?
 
-- Prevents context explosion
-- Controls latency and cost
-- Maintains conversation continuity
+- Prevents context explosion  
+- Controls latency and token cost  
+- Improves response grounding  
+- Enables system observability and evaluation  
+- Supports iterative improvement (RAG, prompt, memory)  
+
+---
 
 ## Future Improvements
 
-- Add RAG (retrieval-based memory): Current retrieval uses simple whitespace-based tokenization, which works for English but not for Chinese queries.
-- LLM powered safety filter (optional)
-- Structured output
-- UI (Streamlit)
+- Replace keyword retrieval with embedding-based retrieval  
+- Add reranking for improved relevance  
+- Introduce LLM-based evaluation (LLM-as-judge)  
+- Improve safety filtering with LLM  
+- Add structured output (JSON schema)  
+- Build a UI (e.g., Streamlit)  
