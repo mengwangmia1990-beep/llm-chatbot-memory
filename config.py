@@ -9,3 +9,6 @@ RAG_RELEVANCE_THRESHOLD = 0.1
 
 LOG_DIR = "logs"
 TRACE_FILE_NAME = "trace_log.jsonl"
+
+EVAL_DIR = "evaluation"
+EVAL_DATA_FILE = "eval_data.jsonl"

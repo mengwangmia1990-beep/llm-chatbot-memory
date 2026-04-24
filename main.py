@@ -52,16 +52,17 @@ def main():
                 print(f"AI: This issue involves {category}, I cannot answer it.")
                 continue
 
-        messages.append(
-            {"role": "user", "content": user_input}
-        )
-
         reply, rag_result = generate_reply(user_input, knowledge, messages)
 
         if reply is None:
-            messages.pop() # rollback没成功的用户问题
+            # rollback没成功的用户问题
+            set_trace(user_input, rag_result, reply, "llm_failed")
             continue
 
+        # attach user history
+        messages.append(
+            {"role": "user", "content": user_input}
+            )
         # attach assistant history
         messages.append(
             {"role": "assistant", "content": reply}
@@ -79,7 +80,7 @@ def main():
         print("AI: ", reply)
         print("==========================================================================")
 
-def set_trace(user_input, result, reply):
+def set_trace(user_input, result, reply, error=None):
     LOG_DIR = config.LOG_DIR
     LOG_FILE = os.path.join(LOG_DIR, config.TRACE_FILE_NAME)
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -89,7 +90,7 @@ def set_trace(user_input, result, reply):
         "retrieval": {
             "use_rag": result["use_rag"],
             "top_chunks": result["top_chunks"],
-            "top_chunk": result["top_chunks"][0],
+            "top_chunk": result["top_chunks"][0] if result["top_chunks"] else None,
             "top_scores": result["top_scores"],
             "top_score": result["top_score"],
             "threshold": config.RAG_RELEVANCE_THRESHOLD
@@ -97,7 +98,8 @@ def set_trace(user_input, result, reply):
         "response": {
             "reply": reply,
             "mode": "rag" if result["use_rag"] else "llm"
-        }
+        },
+        "error": error
     }
     
     # output metrics
@@ -156,13 +158,16 @@ def context_management(messages):
 
 def generate_reply(user_input, knowledge, messages):
     result = rag.retrieve(user_input, knowledge)
-    if result["use_rag"]:
+    
+    if result["use_rag"]: # routing
         rag_prompt = build_rag_messages(result, user_input)
-        # 临时加一轮, 不永久写入message对话
         response = llm.call_llm(messages + rag_prompt)
     else:
         # Call LLM model and collect response
-        response = llm.call_llm(messages)
+        user_messages = [
+            {"role": "user", "content": user_input}
+        ]
+        response = llm.call_llm(messages + user_messages)
 
     return response, result
 
