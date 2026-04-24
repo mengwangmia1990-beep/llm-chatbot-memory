@@ -60,5 +60,6 @@ def retrieve(query, knowledge, top_k=2):
         "top_chunks": top_chunks,
         "top_scores": top_scores,
         "top_score": top_score,
-        "use_rag": use_rag
+        "use_rag": use_rag # use_rag indicates that the system considers the knowledge base relevant to the query, 
+# and therefore includes retrieved context to assist the LLM in answering.
     }

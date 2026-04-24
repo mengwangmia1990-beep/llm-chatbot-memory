@@ -1,7 +1,7 @@
 #RULE-BASED POLICY
 unsafe_keywords = {
     "self-harm": {
-        "keyword": ["sucicide", "end myself", "kill myself"],
+        "keyword": ["suicide", "end myself", "kill myself"],
         "action": "support"
     },
     "violence": {
