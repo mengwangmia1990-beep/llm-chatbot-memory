@@ -150,6 +150,23 @@ This enables:
 - Analyzing model behavior  
 - Supporting manual and automated evaluation  
 
+### 8. Evaluation - Failure Analysis
+We categorize failures into three stages: routing, retrieval, and generation. This taxonomy helps isolate failures across different stages of the RAG pipeline, enabling targeted debugging and system improvement.
+- **Routing (Gating)**
+  - use_rag = `True` indicating system considers knowledge base relevant to the user query, therefore includes the relevant evidence/context to assit LLM for answering.
+  - use_rag = `False` for general questions. 
+  - `GATING_FALSE_POSITIVE`: Knowledge base is not relevant to the question, however, system considers the relevancy.
+  - `GATING_FALSE_NEGATIVE`: Knowledge base is relevant to the question, however, system denies the relevancy.
+- **Retrieval (Recall)**
+  - `TOPK_RECALL_FAILED`: Question is **answerable** from knowledge base, system finds knowledge base relevant to the question (use_rag = `True`), however, topk chunks does not contain the **gold_chunk**.
+- **Abstain issue (Grounding / Abstention)**
+  - `SHOULD_ABSTAIN_BUT_ANSWERED`: Given by the query is **not answerable** from knowledge base, system finds knowledge base relevant (use_rag = `True`) and sends the context to LLM, however LLM ends up answering questions without saying "I don't know".
+  - `SHOULD_ANSWERED_BUT_ABSTAIN`: Given by the query is **answerable** from knowledge base, system finds knowledge base relevant (use_rag = `True`) and sends the context to LLM, however, LLM replys "I don't know".  
+- **Answer Correctness**
+  - `answer_correct`: system provides the correct expected answer. (So far this metric is tagged manually, will use `llm_as_judge` in the future iteration.)
+
+
+
 ---
 
 ## Why This Design?
