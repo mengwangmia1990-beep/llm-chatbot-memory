@@ -8,3 +8,5 @@ logs/
 
 # test
 test/
+
+evaluation/eval_report.jsonl
