@@ -12,3 +12,4 @@ TRACE_FILE_NAME = "trace_log.jsonl"
 
 EVAL_DIR = "evaluation"
 EVAL_DATA_FILE = "eval_data.jsonl"
+EVAL_REPORT_FILE = "eval_report.jsonl"
