@@ -24,6 +24,7 @@ def main():
             reply, rag_result = generate_reply(query, knowledge, messages)
 
             print(reply)
+            print()
             
             # failure_type
             # failure_type = get_failure_type()
@@ -141,7 +142,7 @@ def get_failure_type(
     if should_answer_but_abstained:
         return enums.FailureType.SHOULD_ANSWER_BUT_ABSTAINED.value
     
-    if not top1_correct:
+    if top1_correct is not None and not top1_correct:
         return enums.FailureType.TOP1_RANKING_FAILED.value
     
     return enums.FailureType.NONE.value

@@ -10,4 +10,4 @@
 {"query": "does priority shipping take 1 day?", "gold_answer": "I don't know.", "answerable_from_kb": false, "use_rag": true, "gold_chunks": []}
 {"query": "how much discount can a non-member get ?", "gold_answer": "I don't know", "answerable_from_kb": false, "use_rag": true, "gold_chunks": []}
 {"query": "can customers return items broken ?", "gold_answer": "I don't know.", "answerable_from_kb": false, "use_rag": true, "gold_chunks": []}
-{"query": "can I return an item after 8 days?", "gold_answer": "No, customers can only return items within 7 days with a receipt.", "answerable_from_kb": false, "use_rag": true, "gold_chunks": []}
+{"query": "can I return an item after 8 days?", "gold_answer": "No, customers can only return items within 7 days with a receipt.", "answerable_from_kb": true, "use_rag": true, "gold_chunks": ["Return Policy: Customers can return items within 7 days with a receipt."]}

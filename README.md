@@ -150,6 +150,8 @@ This enables:
 - Analyzing model behavior  
 - Supporting manual and automated evaluation  
 
+---
+
 ### 8. Evaluation - Failure Analysis
 We categorize failures into three stages: routing, retrieval, and generation. This taxonomy helps isolate failures across different stages of the RAG pipeline, enabling targeted debugging and system improvement.
 - **Routing (Gating)**
@@ -165,8 +167,88 @@ We categorize failures into three stages: routing, retrieval, and generation. Th
 - **Answer Correctness**
   - `answer_correct`: system provides the correct expected answer. (So far this metric is tagged manually, will use `llm_as_judge` in the future iteration.)
 
+---
+### 9. Evaluation - Result
+Below are a few interesting and valuable result data that reflects the potential failures of current system:  
+1. This failure type is **should_answer_but_abstained**, given by gating, top1 and topk_recall are all correct. Which means this could be LLM issue.
+```json
+{
+  "query": "can customer return items without a receipt ?", 
+  "expected": {
+    "answerable_from_kb": true, 
+    "expected_use_rag": true, 
+    "should_answer_from_kb": true, 
+    "should_abstain": false
+    }, 
+  "actual": {
+    "actual_use_rag": true, 
+    "abstained": true
+    }, 
+  "result": {
+    "gating_correct": true, 
+    "top1_correct": true, 
+    "topk_recall": true,  
+    "should_abstain_but_answered": false, "should_answer_but_abstained": true
+    },
+  "generation": {
+    "answer_correct": false
+    },
+  "failure_type": "should_answer_but_abstained"
+}
+```
 
+2. This question follows a question **"what time does store open on Sunday ?"**. Given by the context, LLM should understand that user is asking the open time of the store on Satuarday. However, due to the keyword overlap matching limitation in the current RAG retrieving logic, system failed to determine the relevancy of this question with knowledge base. Gating failed, top1 and topk_recall both failed, thus fallback to LLM mode. This is a **gating_false_negative** failure.
+```json
+{
+  "query": "what about Satuarday ?", 
+  "expected": {
+    "answerable_from_kb": true, 
+    "expected_use_rag": true, 
+    "should_answer_from_kb": true, 
+    "should_abstain": false
+    }, 
+  "actual": {
+    "actual_use_rag": false, 
+    "abstained": false
+    }, 
+  "result": {
+    "gating_correct": false, 
+    "top1_correct": false, 
+    "topk_recall": false, 
+    "should_abstain_but_answered": false, 
+    "should_answer_but_abstained": false
+    }, 
+  "generation": {
+    "answer_correct": false
+    }, 
+  "failure_type": "gating_false_negative"
+}
 
+```
+3. This example falls into **top1_ranking_failure** issue. Although top1 chunk is not the gold chunk, however, topk_recall is true, which means gold chunk is retrieved within topk chunks, therefore LLM is able to provide the correct answer.
+```json
+{
+  "query": "how much discount can a member get ?", "expected": {
+    "answerable_from_kb": true, 
+    "expected_use_rag": true, "should_answer_from_kb": true, 
+    "should_abstain": false
+    }, 
+  "actual": {
+    "actual_use_rag": true, 
+    "abstained": false
+    }, 
+  "result": {
+    "gating_correct": true, 
+    "top1_correct": false, 
+    "topk_recall": true, "should_abstain_but_answered": false, "should_answer_but_abstained": false
+    }, 
+  "generation": {
+    "answer_correct": null
+    }, 
+  "failure_type": "top1_ranking_failed"
+}
+
+```
 ---
 
 ## Why This Design?
