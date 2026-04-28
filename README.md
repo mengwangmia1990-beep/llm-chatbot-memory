@@ -188,7 +188,8 @@ Below are a few interesting and valuable result data that reflects the potential
     "gating_correct": true, 
     "top1_correct": true, 
     "topk_recall": true,  
-    "should_abstain_but_answered": false, "should_answer_but_abstained": true
+    "should_abstain_but_answered": false, 
+    "should_answer_but_abstained": true
     },
   "generation": {
     "answer_correct": false
@@ -197,7 +198,8 @@ Below are a few interesting and valuable result data that reflects the potential
 }
 ```
 
-2. This question follows a question **"what time does store open on Sunday ?"**. Given by the context, LLM should understand that user is asking the open time of the store on Satuarday. However, due to the keyword overlap matching limitation in the current RAG retrieving logic, system failed to determine the relevancy of this question with knowledge base. Gating failed, top1 and topk_recall both failed, thus fallback to LLM mode. This is a **gating_false_negative** failure.
+2. This question follows a question **"what time does store open on Sunday ?"**. Given by the context, LLM should understand that user is asking the open time of the store on Satuarday. However, due to the keyword overlap matching limitation in the current RAG retrieving logic, system failed to determine the relevancy of this question with knowledge base. Gating failed, top1 and topk_recall both failed, thus fallback to LLM mode. This is a **gating_false_negative** failure.  
+**Short or misspelled queries can cause keyword-based retrieval scores to drop below the gating threshold, leading to false negatives even when the query is answerable from the KB.**
 ```json
 {
   "query": "what about Satuarday ?", 
@@ -228,9 +230,11 @@ Below are a few interesting and valuable result data that reflects the potential
 3. This example falls into **top1_ranking_failure** issue. Although top1 chunk is not the gold chunk, however, topk_recall is true, which means gold chunk is retrieved within topk chunks, therefore LLM is able to provide the correct answer.
 ```json
 {
-  "query": "how much discount can a member get ?", "expected": {
+  "query": "how much discount can a member get ?",
+  "expected": {
     "answerable_from_kb": true, 
-    "expected_use_rag": true, "should_answer_from_kb": true, 
+    "expected_use_rag": true, 
+    "should_answer_from_kb": true, 
     "should_abstain": false
     }, 
   "actual": {
@@ -240,7 +244,9 @@ Below are a few interesting and valuable result data that reflects the potential
   "result": {
     "gating_correct": true, 
     "top1_correct": false, 
-    "topk_recall": true, "should_abstain_but_answered": false, "should_answer_but_abstained": false
+    "topk_recall": true,
+    "should_abstain_but_answered": false, 
+    "should_answer_but_abstained": false
     }, 
   "generation": {
     "answer_correct": null
@@ -249,6 +255,62 @@ Below are a few interesting and valuable result data that reflects the potential
 }
 
 ```
+4. This question is a out-of-scope query. There is no gold chunk. Therefore the top1_correct and topk_recall are set to None. RAG retrieves the incorrect chunks, however, due to the low score, gating succcessfully rejected it. In other words, retrieval produced unuseful evidence, but gating correctly rejected it.
+```json
+{
+  "query": "what products do you sell ?", 
+  "expected": {
+    "answerable_from_kb": false, 
+    "expected_use_rag": false, 
+    "should_answer_from_kb": false,
+    "should_abstain": false
+    }, 
+  "actual": {
+    "actual_use_rag": false, 
+    "abstained": false
+    }, 
+  "result": {
+    "gating_correct": true, 
+    "top1_correct": null, 
+    "topk_recall": null, 
+    "should_abstain_but_answered": false,  
+    "should_answer_but_abstained": false  
+    }, 
+  "generation": {
+    "answer_correct": null
+    }, 
+  "failure_type": "none"
+}
+```
+5. This question falls into **gating_false_negative** failure. But it reflects a very critical and interesting issue within the current system. Notice topk_recall is true, however, the top1 chunk is false. And actual_use_rag is set to false. The reason is that current RAG uses only top1 score to compare the threshold when gating. **Some false negatives occur even when top-k recall succeeds, because the gating decision depends only on the top-1 score. This suggests improving the gating strategy or using semantic retrieval.**
+```json
+{
+  "query": "how long does delivery usually take ?", 
+  "expected": {
+    "answerable_from_kb": true, 
+    "expected_use_rag": true, 
+    "should_answer_from_kb": true, 
+    "should_abstain": false  
+    }, 
+  "actual": {
+    "actual_use_rag": false, 
+    "abstained": false
+    }, 
+  "result": {
+    "gating_correct": false, 
+    "top1_correct": false, 
+    "topk_recall": true, 
+    "should_abstain_but_answered": false, 
+    "should_answer_but_abstained": false  
+    }, 
+  "generation": {
+    "answer_correct": null
+    }, 
+  "failure_type": "gating_false_negative"
+}
+
+```
+
 ---
 
 ## Why This Design?
