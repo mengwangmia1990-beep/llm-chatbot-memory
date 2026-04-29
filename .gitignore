@@ -10,3 +10,4 @@ logs/
 test/
 
 evaluation/eval_report.jsonl
+evaluation/eval_summary.jsonl

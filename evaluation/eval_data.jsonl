@@ -19,3 +19,4 @@
 {"query": "what products do you sell ?", "gold_answer": "I don't know.", "answerable_from_kb": false, "use_rag": false, "gold_chunks": []}
 {"query": "do members get free shipping ?", "gold_answer": "I don't know.", "answerable_from_kb": false, "use_rag": true, "gold_chunks": []}
 {"query": "so customers cannot return items after 7 days, right ?", "gold_answer": "Yes, customers can only return items within 7 days with a receipt.", "answerable_from_kb": true, "use_rag": true, "gold_chunks": ["Return Policy: Customers can return items within 7 days with a receipt."]}
+{"query": "is VIP customer eligible for free returns?", "gold_answer": "I don't know.", "answerable_from_kb": false, "use_rag": true, "gold_chunks": []}
