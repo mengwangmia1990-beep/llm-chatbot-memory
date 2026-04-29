@@ -43,6 +43,10 @@ In addition, the project includes an **evaluation pipeline** that measures syste
   "content": "Instructions, rules, and context"
 },
 {
+  "role": "system",
+  "content": "Summarized long-term conversation memory"
+},
+{
   "role": "user",
   "content": "User input"
 },
@@ -52,43 +56,39 @@ In addition, the project includes an **evaluation pipeline** that measures syste
 }
 ```
 
-- The first system message defines global behavior  
-- The second system message stores summarized conversation history  
+- The first system message defines the assistant’s global behavior, safety rules, and response constraints.  
+- The second system message stores summarized long-term memory from earlier conversation turns.  
+- Recent user/assistant messages are kept as short-term memory for local conversational context.
 
 ---
 
 ### 2. Conversation Flow
 
 User Input  
-→ Safety Check  
-→ Append to Message History  
-→ Retrieval (RAG decision)  
-→ Prompt Construction (optional RAG context injection)  
-→ LLM Call  
-→ Append Assistant Response  
+→ Input Validation & Safety Filtering  
+→ Retrieval & Gating (routing RAG or LLM path)  
+→ Prompt Construction (inject RAG context if applicable)  
+→ LLM Inference  
+→ Update Conversation State (append user & assistant messages)    
 → Context Window Management  
 → Optional Summarization  
+→ Observability Logging (structured trace)  
 
 ---
 
 ### 3. Retrieval-Augmented Generation (RAG)
 
-- Current implementation uses keyword-based scoring (token overlap)
-- Top-k chunks are selected and injected into the prompt
-- Threshold-based gating determines whether to use RAG
-
-#### Known Limitations
-
-- Ranking instability for short or ambiguous queries  
-- Lexical matching struggles with semantic similarity  
-- Top-k may include noisy or partially relevant chunks  
+- Current implementation uses keyword-based scoring (token overlap)  
+- Threshold-based gating determines whether to use RAG (top1 chunk score > gating threshold)  
+- Top-k chunks are injected into prompt when routing to RAG mode
 
 #### Key Insight
 
-Even when the correct chunk appears in top-k, the model may:
-- Recover the correct answer  
-- Fail due to noisy context  
-- Or respond conservatively ("I don't know")  
+**Top-k recall does not guarantee answer correctness.**
+
+There are two major failure paths:
+- The correct chunk appears in top-k, but gating fails because the top-1 score is below threshold, so the system falls back to LLM mode without context.  
+- The correct chunk appears in top-k and RAG is triggered, but the model still fails to generate a grounded answer due to noisy context, misunderstanding, or over-inference.  
 
 #### Gating Behavior
 
@@ -122,20 +122,21 @@ The system dynamically routes responses based on retrieval confidence:
 
 #### Summarization Strategy
 
-- Triggered when context exceeds threshold  
+- Triggered when context window length exceeds threshold  
 - Only intermediate messages are summarized  
-- Recent messages are preserved for recency  
+- Most recent messages are preserved for recency  
+- **Fallback**: if summarization fails, the system degrades to keeping only the most recent messages
 
 #### Optimization
 
-- Avoid re-summarizing existing summaries  
+- Limit repeated summarization of existing summaries to mitigate cumulative information loss  
 - Preserve important context while reducing token usage  
 
 ---
 
 ### 6. Failure Handling
 
-- API failure → rollback user message  
+- LLM API failure → continue chat loop  
 - Summarization failure → fallback to truncated recent history  
 
 ---
@@ -150,25 +151,34 @@ Each interaction is logged as structured JSON (JSONL format):
   "retrieval": {
     "use_rag": true,
     "top_chunks": [...],
+    "top_chunk": ...
     "top_scores": [...],
+    "top_score": ...
     "threshold": ...
   },
   "response": {
-    "answer": "...",
+    "reply": "...",
     "mode": "rag"
-  }
+  },
+  "error": "..."
 }
 ```
 
 This enables:
-
 - Debugging retrieval quality  
 - Analyzing model behavior  
 - Supporting manual and automated evaluation  
 
 ---
 
-### 8. Evaluation - Failure Analysis
+### 8. Evaluation - Pipeline Workflow  
+→ Load evaluation dataset `eval_data.jsonl` (expected behaviors with gold answers, etc)  
+→ Generate model response (actual behaviors)  
+→ Perform per-case evaluation  
+→ Generate evaluation report `eval_report.jsonl` (JSONL with structured metrics and failure types)  
+→ Metrics Aggregation  
+
+### 9. Evaluation - Failure Analysis
 We categorize failures into three stages: routing, retrieval, and generation. This taxonomy helps isolate failures across different stages of the RAG pipeline, enabling targeted debugging and system improvement.
 - **Routing (Gating)**
   - use_rag = `True` indicating system considers knowledge base relevant to the user query, therefore includes the relevant evidence/context to assit LLM for answering.
@@ -184,7 +194,7 @@ We categorize failures into three stages: routing, retrieval, and generation. Th
   - `answer_correct`: system provides the correct expected answer. (So far this metric is tagged manually, will use `llm_as_judge` in the future iteration.)
 
 ---
-### 9. Evaluation - Failure Analysis Breakdown
+### 10. Evaluation - Per-Case Breakdown
 Below are a few interesting and valuable result data that reflects the potential failures of current system:  
 1. This failure type is **should_answer_but_abstained**, given by gating, top1 and topk_recall are all correct. Which means this could be LLM issue.
 ```json
@@ -355,7 +365,7 @@ Below are a few interesting and valuable result data that reflects the potential
 
 ```
 ---
-## Evaluation - Summary Insight
+### 11. Evaluation - Summary Insight (Metrics Aggregation)
 From below summary data, we could find valuable insights of current system potential issues:
 1. The system suffers from **gating false negatives**, where relevant queries fail to trigger retrieval due to low keyword matching scores.  
 2. Topk retrieval recall is relatively strong, indicating that the knowledge base contains sufficient information and can be retrieved when triggered.  
@@ -399,7 +409,6 @@ Based on the evaluation, the main bottleneck is **keyword-based retrieval** and 
 
 ```
 
-
 ---
 
 ## Why This Design?
@@ -414,9 +423,17 @@ Based on the evaluation, the main bottleneck is **keyword-based retrieval** and 
 
 ## Future Improvements
 
-- Replace keyword retrieval with embedding-based retrieval  
-- Add reranking for improved relevance  
-- Introduce LLM-based evaluation (LLM-as-judge)  
-- Improve safety filtering with LLM  
-- Add structured output (JSON schema)  
-- Build a UI (e.g., Streamlit)  
+### Iteration II: Embedding-based RAG
+- Replace keyword-based retrieval with embedding-based semantic retrieval
+- Compare keyword retrieval vs. embedding retrieval using the existing evaluation pipeline
+- Measure improvements in gating accuracy, top-k recall, and false negative rate
+
+### Iteration III: Answer Quality & Grounding
+- Introduce LLM-as-judge to evaluate answer correctness and groundedness
+- Add structured output using JSON schema
+- Add answer verification to reduce unsupported or hallucinated responses
+
+### Additional Improvements
+- Improve safety filtering with LLM-based classification
+- Add reranking to improve top-1 relevance
+- Build a UI, such as Streamlit, for easier interaction and demo
