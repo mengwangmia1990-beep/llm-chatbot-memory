@@ -74,9 +74,6 @@ def main():
         # set trace and output to json file for observation
         set_trace(user_input, rag_result, reply)
 
-        # TODO
-        # top1_correct, topk_contains_answer, answerable_from_kb, answer_correct, failure_type, actual_use_rag, expected_use_rag
-
         print("AI: ", reply)
         print("==========================================================================")
 
