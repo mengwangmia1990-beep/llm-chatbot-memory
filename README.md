@@ -1,12 +1,16 @@
 # AI Conversational Assistant with Memory, Safety & Hybrid RAG
 
 ## Overview
-This project is a CLI-based conversational assistant powered by the OpenAI API.  
-It supports multi-turn dialogue with hybrid memory (short-term + summarized long-term), rule-based safety filtering, and a lightweight Retrieval-Augmented Generation (RAG) pipeline.
+This project is a CLI-based conversational assistant powered by the OpenAI API.
+
+It supports multi-turn dialogue with hybrid memory (short-term + summarized long-term), 
+a lightweight Retrieval-Augmented Generation (RAG) pipeline, and a structured evaluation framework for analyzing system performance.
 
 The system follows a **hybrid answering strategy**:
 - When relevant knowledge is retrieved, responses are grounded using RAG
-- Otherwise, the system falls back to the base LLM to provide general answers
+- Otherwise, the system falls back to the base LLM
+
+In addition, the project includes an **evaluation pipeline** that measures system performance across routing, retrieval, and generation, enabling systematic failure analysis and iterative improvement.
 
 ---
 
@@ -14,13 +18,18 @@ The system follows a **hybrid answering strategy**:
 
 - Multi-turn conversation with LLM
 - Hybrid memory (short-term + long-term summarized memory)
-- Context window management with summarization
-- Retrieval-Augmented Generation (RAG)
-- Conditional knowledge injection (non-persistent)
-- Hybrid answering (RAG + fallback LLM)
+- Retrieval-Augmented Generation (RAG) with keyword-based retrieval
+- Threshold-based RAG gating (dynamic routing between RAG and LLM)
+- Hybrid answering strategy (grounded + fallback responses)
 - Rule-based safety filtering
-- Basic failure handling (rollback mechanism)
 - Observability via structured trace logging (JSONL)
+
+### Evaluation & Analysis
+- Structured evaluation dataset with labeled ground truth
+- Per-case evaluation (routing, retrieval, generation)
+- Failure taxonomy (gating, retrieval, abstention, hallucination)
+- Aggregate metrics (accuracy, recall, abstain behavior)
+- Failure breakdown analysis for system debugging
 
 ---
 
@@ -81,19 +90,26 @@ Even when the correct chunk appears in top-k, the model may:
 - Fail due to noisy context  
 - Or respond conservatively ("I don't know")  
 
+#### Gating Behavior
+
+The current system uses the top1 retrieval score to determine whether to trigger RAG.  
+This design simplifies routing but introduces sensitivity to ranking quality.
+
+In practice, this may lead to **gating false negatives**, where relevant queries fail to trigger RAG due to low top1 scores, even when the correct chunk exists in topk results.
+
 ---
 
 ### 4. Hybrid Answering Strategy
 
-The system dynamically routes responses:
+The system dynamically routes responses based on retrieval confidence:
 
 - **RAG mode (`mode="rag"`)**
-  - Triggered when relevant knowledge is detected
-  - Uses retrieved context to produce grounded responses
+  - Triggered when retrieval score exceeds threshold
+  - Provides grounded responses using external knowledge
 
 - **Fallback mode (`mode="llm"`)**
-  - Triggered when no relevant knowledge is found
-  - Uses base LLM to answer general questions
+  - Triggered when retrieval confidence is low
+  - Allows general reasoning but may introduce hallucination risk
 
 ---
 
