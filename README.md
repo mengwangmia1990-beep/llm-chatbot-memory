@@ -168,7 +168,7 @@ We categorize failures into three stages: routing, retrieval, and generation. Th
   - `answer_correct`: system provides the correct expected answer. (So far this metric is tagged manually, will use `llm_as_judge` in the future iteration.)
 
 ---
-### 9. Evaluation - Result
+### 9. Evaluation - Failure Analysis Breakdown
 Below are a few interesting and valuable result data that reflects the potential failures of current system:  
 1. This failure type is **should_answer_but_abstained**, given by gating, top1 and topk_recall are all correct. Which means this could be LLM issue.
 ```json
@@ -310,6 +310,79 @@ Below are a few interesting and valuable result data that reflects the potential
 }
 
 ```
+6. This is a typical **hallucination problem**. Question is not answerable from the knowledge base however the system falls back to LLM model (`actual_use_rag == False`) and LLM hallucinated.
+```json
+{
+  "query": "is VIP customer eligible for free returns ?", 
+  "expected": {
+    "answerable_from_kb": false, 
+    "expected_use_rag": true, 
+    "should_answer_from_kb": false, 
+    "should_abstain": true
+    }, 
+  "actual": {
+    "actual_use_rag": false, 
+    "abstained": false
+    }, 
+  "result": {
+    "gating_correct": false, 
+    "top1_correct": null, 
+    "topk_recall": null, 
+    "should_abstain_but_answered": true, 
+    "should_answer_but_abstained": false
+    }, 
+  "generation": {
+    "answer_correct": null
+    }, 
+  "failure_type": ["gating_false_negative", "should_abstain_but_answered"]
+}
+
+```
+---
+## Evaluation - Summary Insight
+From below summary data, we could find valuable insights of current system potential issues:
+1. The system suffers from **gating false negatives**, where relevant queries fail to trigger retrieval due to low keyword matching scores.  
+2. Topk retrieval recall is relatively strong, indicating that the knowledge base contains sufficient information and can be retrieved when triggered.  
+3. Top1 chunk ranking issues reduce the effectiveness of retrieval, as relevant chunks are often not ranked at the top.  
+4. The system effectively avoids hallucination in most cases by abstaining when information is insufficient.
+
+
+Based on the evaluation, the main bottleneck is **keyword-based retrieval** and **gating sensitivity**.  In the next iteration, I plan to introduce embedding-based retrieval to *improve semantic matching* and reduce gating false negatives.
+
+```json
+{
+  "total_cases": 22, 
+  "counts": {
+    "gating_correct": 16, 
+    "top1_correct": 10, 
+    "top1_valid": 16, 
+    "topk_recall": 13, 
+    "topk_valid": 16, 
+    "should_abstain": 5, 
+    "correct_abstain": 4, 
+    "should_answer": 16, 
+    "false_abstain": 1, 
+    "hallucination": 1
+    }, 
+  "rates": {
+    "gating_accuracy": 0.7273, 
+    "top1_accuracy": 0.625, 
+    "topk_recall_rate": 0.8125, 
+    "correct_abstain_rate": 0.8, 
+    "false_abstain_rate": 0.0625, 
+    "hallucination_rate": 0.2
+    }, 
+  "failure_counts": {
+    "gating_false_negative": 6, 
+    "topk_recall_failed": 3, 
+    "top1_ranking_failed": 6, 
+    "should_answer_but_abstained": 1, 
+    "should_abstain_but_answered": 1
+    }
+}
+
+```
+
 
 ---
 

@@ -7,6 +7,8 @@ from common import enums
 
 EVAL_DIR = config.EVAL_DIR
 EVAL_DATA_FILE = os.path.join(EVAL_DIR, config.EVAL_DATA_FILE)
+EVAL_REPORT_FILE = os.path.join(EVAL_DIR, config.EVAL_REPORT_FILE)
+OUTPUT_SUMMARY_FILE = os.path.join(EVAL_DIR, config.EVAL_SUMMARY_FILE)
 
 # load knowledge base
 knowledge = rag.load_knowledge()
@@ -26,27 +28,124 @@ def main():
             print(reply)
             print()
             
-            # failure_type
-            # failure_type = get_failure_type()
-            # ft_1: top1_retrieval_incorrect (top1 retrieval precision)
-            # ft_2: topk_retrieval_missing (topk retrieval failed to recall)
-            # ft_3: should_abstain_but_answered
-            # ft_4: should_answered_but_abstain
-            # ft_5: answer_incorrect
-            # ft_6: typo_query
-            # ft_7: gating_false_positive (system use_rag but are not expected)
-            # ft_8: gating_false_negative (system does not use rag but are expected to use rag)
-            # failure_type = get_failure_type(top_chunks_contain_answer, answerable_from_kb, actual_use_rag, expected_use_rag, reply)
-            # print(failure_type)
-
-            # calculate metrics
-
             # output trace (runtime logging)
             set_trace(query, rag_result, reply)
 
             # output evaluation report
             set_eval_report(query, data, rag_result, reply)
 
+    
+    # aggregate metrics
+    aggregate_metrics()
+
+
+
+def load_eval_report(path):
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            yield json.loads(line)
+
+
+def safe_rate(numerator, denominator):
+    return round(numerator / denominator, 4) if denominator else None
+
+def aggregate_metrics():
+    total_cases = 0
+
+    top1_valid_count = 0
+    top1_correct_count = 0
+
+    topk_valid_count = 0
+    topk_recall_count = 0
+
+    gating_correct_count = 0
+
+    should_abstain_count = 0
+    correct_abstain_count = 0
+
+    should_answer_count = 0
+    false_abstain_count = 0
+
+    hallucination_count = 0
+    failure_counts = {}
+
+    for record in load_eval_report(EVAL_REPORT_FILE):
+        total_cases += 1
+
+        expected = record["expected"]
+        actual = record["actual"]
+        result = record["result"]
+
+        # gating
+        if result["gating_correct"] is True:
+            gating_correct_count += 1
+
+        # top1 accuracy: only count applicable cases
+        if result["top1_correct"] is not None:
+            top1_valid_count += 1
+            if result["top1_correct"] is True:
+                top1_correct_count += 1
+
+        # topk recall: only count applicable cases
+        if result["topk_recall"] is not None:
+            topk_valid_count += 1
+            if result["topk_recall"] is True:
+                topk_recall_count += 1
+
+        # abstain metrics
+        if expected["should_abstain"] is True:
+            should_abstain_count += 1
+            if actual["abstained"] is True:
+                correct_abstain_count += 1
+
+        if expected["should_answer_from_kb"] is True:
+            should_answer_count += 1
+            if result["should_answer_but_abstained"] is True:
+                false_abstain_count += 1
+
+        # hallucination / unsupported answer
+        if result["should_abstain_but_answered"] is True:
+            hallucination_count += 1
+
+        # failure counts
+        for ft in record["failure_type"]:
+            if ft == enums.FailureType.NONE.value:
+                continue
+            failure_counts[ft] = failure_counts.get(ft, 0) + 1
+
+    summary = {
+        "total_cases": total_cases,
+
+        "counts": {
+            "gating_correct": gating_correct_count,
+            "top1_correct": top1_correct_count,
+            "top1_valid": top1_valid_count,
+            "topk_recall": topk_recall_count,
+            "topk_valid": topk_valid_count,
+            "should_abstain": should_abstain_count,
+            "correct_abstain": correct_abstain_count,
+            "should_answer": should_answer_count,
+            "false_abstain": false_abstain_count,
+            "hallucination": hallucination_count,
+        },
+
+        "rates": {
+            "gating_accuracy": safe_rate(gating_correct_count, total_cases),
+            "top1_accuracy": safe_rate(top1_correct_count, top1_valid_count),
+            "topk_recall_rate": safe_rate(topk_recall_count, topk_valid_count),
+            "correct_abstain_rate": safe_rate(correct_abstain_count, should_abstain_count),
+            "false_abstain_rate": safe_rate(false_abstain_count, should_answer_count),
+            "hallucination_rate": safe_rate(hallucination_count, should_abstain_count),
+        },
+
+        "failure_counts": failure_counts,
+    }
+
+    with open(OUTPUT_SUMMARY_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(summary, ensure_ascii=False) + "\n")
+        
 
 def set_eval_report(query, data, rag_result, reply):
     EVAL_DIR = config.EVAL_DIR
@@ -126,26 +225,28 @@ def get_failure_type(
     should_answer_but_abstained,
     answer_correct=None,):
 
+    failures = []
+
     # gating
     if not expect_use_rag and actual_use_rag:
-        return enums.FailureType.GATING_FALSE_POSITIVE.value
+        failures.append(enums.FailureType.GATING_FALSE_POSITIVE.value)
     if expect_use_rag and not actual_use_rag:
-        return enums.FailureType.GATING_FALSE_NEGATIVE.value
+        failures.append(enums.FailureType.GATING_FALSE_NEGATIVE.value)
     
     # topk recall
     if expect_use_rag and answerable_from_kb and not topk_recall:
-        return enums.FailureType.TOPK_RECALL_FAILED.value
+        failures.append(enums.FailureType.TOPK_RECALL_FAILED.value)
     
     if should_abstain_but_answered:
-        return enums.FailureType.SHOULD_ABSTAIN_BUT_ANSWERED.value
+        failures.append(enums.FailureType.SHOULD_ABSTAIN_BUT_ANSWERED.value)
     
     if should_answer_but_abstained:
-        return enums.FailureType.SHOULD_ANSWER_BUT_ABSTAINED.value
+        failures.append(enums.FailureType.SHOULD_ANSWER_BUT_ABSTAINED.value)
     
     if top1_correct is not None and not top1_correct:
-        return enums.FailureType.TOP1_RANKING_FAILED.value
+        failures.append(enums.FailureType.TOP1_RANKING_FAILED.value)
     
-    return enums.FailureType.NONE.value
+    return failures or [enums.FailureType.NONE.value]
 
 
 if __name__ == "__main__":
