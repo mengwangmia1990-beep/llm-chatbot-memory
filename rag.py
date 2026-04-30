@@ -28,7 +28,7 @@ def calculate_score(query_words, chunk_words):
     return overlap_ratio
 
 
-def retrieve(query, knowledge, top_k=2):
+def retrieve_keyword(query, knowledge, top_k=2):
     query_words = query.lower().split() # query preprocessing
     scored_chunks = []
 
@@ -63,3 +63,11 @@ def retrieve(query, knowledge, top_k=2):
         "use_rag": use_rag # use_rag indicates that the system considers the knowledge base relevant to the query, 
 # and therefore includes retrieved context to assist the LLM in answering.
     }
+
+
+def embed_knowledge(knowledge):
+    return None
+
+
+def retrieve_embedding(query, embedded_knowledge, top_k=2):
+    return None

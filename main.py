@@ -27,8 +27,11 @@ def main():
         system_message
     ]
 
-    # load knowledge
+    # pre-load knowledge
     knowledge = rag.load_knowledge()
+
+    # pre-embedd knowledge
+    embedded_knowledge = rag.embed_knowledge(knowledge)
 
     print("Put your questions below:")
     while True:
@@ -52,7 +55,7 @@ def main():
                 print(f"AI: This issue involves {category}, I cannot answer it.")
                 continue
 
-        reply, rag_result = generate_reply(user_input, knowledge, messages)
+        reply, rag_result = generate_reply(user_input, knowledge, embedded_knowledge, messages, config.RETRIEVE_MODE_KEYWORD)
 
         if reply is None:
             # rollback没成功的用户问题
@@ -153,8 +156,11 @@ def context_management(messages):
 
     return messages
 
-def generate_reply(user_input, knowledge, messages):
-    result = rag.retrieve(user_input, knowledge)
+def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode):
+    if retrieve_mode == config.RETRIEVE_MODE_KEYWORD:
+        result = rag.retrieve_keyword(user_input, knowledge)
+    elif retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
+        result = rag.retrieve_embedding(user_input, embedded_knowledge)
     
     if result["use_rag"]: # routing
         rag_prompt = build_rag_messages(result, user_input)
