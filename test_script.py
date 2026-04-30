@@ -22,8 +22,11 @@ def main():
             query = data["query"]
             print(query)
 
-            # call generate_reply
-            reply, rag_result = generate_reply(query, knowledge, messages)
+            # call generate_reply for keyword retrieve mode
+            reply, rag_result = generate_reply(query, knowledge, messages, config.RETRIEVE_MODE_KEYWORD)
+
+            # TODO: call generate_reply for embedding retrieve mode
+            # reply, rag_result = generate_reply(query, knowledge, messages, config.RETRIEVE_MODE_EMBEDDING)
 
             print(reply)
             print()

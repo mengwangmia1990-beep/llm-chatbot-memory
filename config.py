@@ -1,4 +1,8 @@
+RETRIEVE_MODE_KEYWORD = "keyword"
+RETRIEVE_MODE_EMBEDDING = "embedding"
+
 MODEL_NAME = "gpt-4o-mini"
+EMBEDDING_MODEL_NAME = "text-embedding-3-small"
 
 MAX_TURN = 5
 MAX_MESSAGES = MAX_TURN * 2
