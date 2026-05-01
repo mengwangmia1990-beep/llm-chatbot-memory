@@ -4,6 +4,7 @@ import os
 import rag
 from main import generate_reply, system_message, set_trace
 from common import enums
+from collections import defaultdict
 
 EVAL_DIR = config.EVAL_DIR
 EVAL_DATA_FILE = os.path.join(EVAL_DIR, config.EVAL_DATA_FILE)
@@ -20,30 +21,30 @@ messages = [system_message]
 retrieve_mode = config.RETRIEVE_MODE_EMBEDDING
 
 def main():
-    with open(EVAL_DATA_FILE) as f:
-        for line in f:
-            # load query
-            data = json.loads(line)
-            query = data["query"]
-            print(query)
+    for gating in config.RAG_RELEVANCE_EMBEDDING_THRESHOLD_TREATMENTS:
+        with open(EVAL_DATA_FILE) as f:
+            for line in f:
+                # load query
+                data = json.loads(line)
+                query = data["query"]
+                print(query)
 
-            # call generate_reply for keyword retrieve mode
-            # reply, rag_result = generate_reply(query, knowledge, messages, config.RETRIEVE_MODE_KEYWORD)
+                # call generate_reply for keyword retrieve mode
+                # reply, rag_result = generate_reply(query, knowledge, messages, config.RETRIEVE_MODE_KEYWORD)
 
-            # TODO: call generate_reply for embedding retrieve mode
-            reply, rag_result = generate_reply(query, knowledge, embedded_knowledge, messages, retrieve_mode)
+                # TODO: call generate_reply for embedding retrieve mode
+                reply, rag_result = generate_reply(query, knowledge, embedded_knowledge, messages, retrieve_mode, gating)
 
-            print(reply)
-            print()
-            
-            # output trace (runtime logging)
-            set_trace(query, rag_result, retrieve_mode, reply)
+                print(reply)
+                print()
+                
+                # output trace (runtime logging)
+                set_trace(query, rag_result, retrieve_mode, reply, None, gating)
 
-            # output evaluation report
-            set_eval_report(query, data, rag_result, reply, retrieve_mode)
+                # output evaluation report
+                set_eval_report(query, data, rag_result, reply, retrieve_mode, gating)
 
-    
-    # aggregate metrics
+    # aggregate only once after all thresholds are done
     aggregate_metrics()
 
 
@@ -59,7 +60,7 @@ def load_eval_report(path):
 def safe_rate(numerator, denominator):
     return round(numerator / denominator, 4) if denominator else None
 
-def aggregate_metrics():
+def compute_metrics_for_records(records):
     total_cases = 0
 
     top1_valid_count = 0
@@ -79,30 +80,26 @@ def aggregate_metrics():
     hallucination_count = 0
     failure_counts = {}
 
-    for record in load_eval_report(EVAL_REPORT_FILE):
+    for record in records:
         total_cases += 1
 
         expected = record["expected"]
         actual = record["actual"]
         result = record["result"]
 
-        # gating
         if result["gating_correct"] is True:
             gating_correct_count += 1
 
-        # top1 accuracy: only count applicable cases
         if result["top1_correct"] is not None:
             top1_valid_count += 1
             if result["top1_correct"] is True:
                 top1_correct_count += 1
 
-        # topk recall: only count applicable cases
         if result["topk_recall"] is not None:
             topk_valid_count += 1
             if result["topk_recall"] is True:
                 topk_recall_count += 1
 
-        # abstain metrics
         if expected["should_abstain"] is True:
             should_abstain_count += 1
             if actual["abstained"] is True:
@@ -113,17 +110,15 @@ def aggregate_metrics():
             if result["should_answer_but_abstained"] is True:
                 false_abstain_count += 1
 
-        # hallucination / unsupported answer
         if result["should_abstain_but_answered"] is True:
             hallucination_count += 1
 
-        # failure counts
         for ft in record["failure_type"]:
             if ft == enums.FailureType.NONE.value:
                 continue
             failure_counts[ft] = failure_counts.get(ft, 0) + 1
 
-    summary = {
+    return {
         "total_cases": total_cases,
 
         "counts": {
@@ -151,11 +146,21 @@ def aggregate_metrics():
         "failure_counts": failure_counts,
     }
 
+def aggregate_metrics():
+    groups = defaultdict(list)
+
+    for record in load_eval_report(EVAL_REPORT_FILE):
+        threshold = record.get("gating_threshold", "unknown")
+        groups[threshold].append(record)
+
     with open(OUTPUT_SUMMARY_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(summary, ensure_ascii=False) + "\n")
+        for threshold, records in groups.items():
+            summary = compute_metrics_for_records(records)
+            summary["gating_threshold"] = threshold
+            f.write(json.dumps(summary, ensure_ascii=False) + "\n")
         
 
-def set_eval_report(query, data, rag_result, reply, retrieve_mode):
+def set_eval_report(query, data, rag_result, reply, retrieve_mode, gating=0.0):
     EVAL_DIR = config.EVAL_DIR
     LOG_FILE = os.path.join(EVAL_DIR, config.EVAL_REPORT_FILE)
     os.makedirs(EVAL_DIR, exist_ok=True)
@@ -188,9 +193,19 @@ def set_eval_report(query, data, rag_result, reply, retrieve_mode):
     should_abstain_but_answered = should_abstain and not abstained
     should_answer_but_abstained = should_answer_from_kb and abstained
 
+    gating_threshold = 0.0
+    if retrieve_mode == config.RETRIEVE_MODE_KEYWORD:
+        gating_threshold = config.RAG_RELEVANCE_THRESHOLD
+    elif retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
+        if gating != 0.0:
+            gating_threshold = gating # embedding gating threshold tuning treatments
+        else:
+            gating = config.RAG_RELEVANCE_EMBEDDING_THRESHOLD
+
     eval_report = {
         "query": query,
         "retrieve_mode": retrieve_mode,
+        "gating_threshold": gating_threshold,
 
         "expected": {
             "answerable_from_kb": answerable_from_kb,

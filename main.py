@@ -83,21 +83,36 @@ def main():
         print("==========================================================================")
 
 
-def set_trace(user_input, result, retrieve_mode, reply, error=None):
+def set_trace(user_input, result, retrieve_mode, reply, error=None, gating=0.0):
     LOG_DIR = config.LOG_DIR
     LOG_FILE = os.path.join(LOG_DIR, config.TRACE_FILE_NAME)
     os.makedirs(LOG_DIR, exist_ok=True)
+
+    gating_threshold = config.RAG_RELEVANCE_THRESHOLD
+    if retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
+        if gating != 0.0:
+            gating_threshold = gating # embedding gating threshold tuning treatments
+        else:
+            gating_threshold = config.RAG_RELEVANCE_EMBEDDING_THRESHOLD
 
     trace = {
         "query": user_input,
         "retrieval": {
             "mode": retrieve_mode,
+            "threshold": gating_threshold,
             "use_rag": result["use_rag"],
+
+            "top-k": len(result["top_chunks"]) if result["top_chunks"] else 0,
             "top_chunks": result["top_chunks"],
-            "top_chunk": result["top_chunks"][0] if result["top_chunks"] else None,
             "top_scores": result["top_scores"],
-            "top_score": result["top_score"],
-            "threshold": config.RAG_RELEVANCE_THRESHOLD
+
+            "top1_chunk": result["top1_chunk"],
+            "top1_score": result["top1_score"],
+
+            "top2_chunk": result["top2_chunk"],
+            "top2_score": result["top2_score"],
+
+            "top1_top2_gap": result["top1_score"] - result["top2_score"]
         },
         "response": {
             "reply": reply,
@@ -162,11 +177,11 @@ def context_management(messages):
     return messages
 
 
-def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode):
+def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode, gating=0.0):
     if retrieve_mode == config.RETRIEVE_MODE_KEYWORD:
         result = rag.retrieve_keyword(user_input, knowledge)
     elif retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
-        result = rag.retrieve_embedding(user_input, embedded_knowledge)
+        result = rag.retrieve_embedding(user_input, embedded_knowledge, config.TOPK, gating)
     
     if result["use_rag"]: # routing
         rag_prompt = build_rag_messages(result, user_input)

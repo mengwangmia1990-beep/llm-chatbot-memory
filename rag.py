@@ -92,7 +92,7 @@ def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
 
     return dot_product / (norm1 * norm2)
 
-def retrieve_embedding(query, embedded_knowledge, top_k=2):
+def retrieve_embedding(query, embedded_knowledge, top_k=2, gating=0.0):
     query_vector = embedding_utils.embed_text(query)
     scored_chunks = []
     
@@ -113,13 +113,26 @@ def retrieve_embedding(query, embedded_knowledge, top_k=2):
     # Threshold Gating
     top_scores = [item["score"] for item in candidate_chunks]
     top_chunks = [item["chunk"] for item in candidate_chunks]
-    top_score = top_scores[0] if top_scores else 0.0
 
-    use_rag = top_score >= config.RAG_RELEVANCE_EMBEDDING_THRESHOLD
+    top1_chunk = top_chunks[0] if top_chunks else []
+    top2_chunk = top_chunks[1] if top_chunks and len(top_chunks) > 1 else []
+
+    top1_score = top_scores[0] if top_scores else 0.0
+    top2_score = top_scores[1] if top_scores and len(top_scores) > 1 else 0.0
+    top1_top2_gap = top1_score - top2_score
+
+    gating_threshold = gating if gating != 0.0 else config.RAG_RELEVANCE_EMBEDDING_THRESHOLD
+    use_rag = top1_score >= gating_threshold
 
     return {
         "top_chunks": top_chunks,
         "top_scores": top_scores,
-        "top_score": top_score,
+
+        "top1_chunk": top1_chunk,
+        "top2_chunk": top2_chunk,
+
+        "top1_score": top1_score,
+        "top2_score": top2_score,
+        
         "use_rag": use_rag
     }
