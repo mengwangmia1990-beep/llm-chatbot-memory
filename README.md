@@ -18,7 +18,7 @@ In addition, the project includes an **evaluation pipeline** that measures syste
 
 - Multi-turn conversation with LLM
 - Hybrid memory (short-term + long-term summarized memory)
-- Retrieval-Augmented Generation (RAG) with keyword-based retrieval
+- Retrieval-Augmented Generation (RAG) with keyword-based and embedding-based retrieval (iteration II)  
 - Threshold-based RAG gating (dynamic routing between RAG and LLM)
 - Hybrid answering strategy (grounded + fallback responses)
 - Rule-based safety filtering
@@ -78,24 +78,33 @@ User Input
 
 ### 3. Retrieval-Augmented Generation (RAG)
 
-- Current implementation uses keyword-based scoring (token overlap)  
-- Threshold-based gating determines whether to use RAG (top1 chunk score > gating threshold)  
-- Top-k chunks are injected into prompt when routing to RAG mode
+The system supports two retrieval strategies:
+
+- **Keyword-based retrieval (Iteration I)**
+  - Uses token overlap for scoring
+  - Sensitive to query phrasing, typos, and lexical variation
+
+- **Embedding-based retrieval (Iteration II)**
+  - Uses semantic similarity (cosine similarity on embeddings)
+  - More robust to paraphrasing and natural language variation
+
+Both strategies share a unified RAG pipeline:
+
+- Top-k chunks are retrieved from the knowledge base  
+- A relevance gating mechanism determines whether to trigger RAG  
+- Retrieved context is injected into the prompt when RAG is enabled  
+
+---
 
 #### Key Insight
 
-**Top-k recall does not guarantee answer correctness.**
+**Relevancy and answerable are fundementally different concepts**
 
-There are two major failure paths:
-- The correct chunk appears in top-k, but gating fails because the top-1 score is below threshold, so the system falls back to LLM mode without context.  
-- The correct chunk appears in top-k and RAG is triggered, but the model still fails to generate a grounded answer due to noisy context, misunderstanding, or over-inference.  
+Evaluation across iterations reveals three distinct stages:
 
-#### Gating Behavior
-
-The current system uses the top1 retrieval score to determine whether to trigger RAG.  
-This design simplifies routing but introduces sensitivity to ranking quality.
-
-In practice, this may lead to **gating false negatives**, where relevant queries fail to trigger RAG due to low top1 scores, even when the correct chunk exists in topk results.
+```text
+relevance → retrieval → answerability
+```
 
 ---
 
@@ -178,237 +187,113 @@ This enables:
 → Generate evaluation report `eval_report.jsonl` (JSONL with structured metrics and failure types)  
 → Metrics Aggregation  
 
+---
 ### 9. Evaluation - Failure Analysis
-We categorize failures into three stages: routing, retrieval, and generation. This taxonomy helps isolate failures across different stages of the RAG pipeline, enabling targeted debugging and system improvement.
+
+We categorize failures into three stages: **routing, retrieval, and generation**.  
+This taxonomy helps isolate failures across different stages of the RAG pipeline, enabling targeted debugging and system improvement.
+
 - **Routing (Gating)**
-  - use_rag = `True` indicating system considers knowledge base relevant to the user query, therefore includes the relevant evidence/context to assit LLM for answering.
-  - use_rag = `False` for general questions. 
-  - `GATING_FALSE_POSITIVE`: Knowledge base is not relevant to the question, however, system considers the relevancy.
-  - `GATING_FALSE_NEGATIVE`: Knowledge base is relevant to the question, however, system denies the relevancy.
+  - `GATING_FALSE_POSITIVE`: KB is not relevant but RAG is triggered  
+  - `GATING_FALSE_NEGATIVE`: KB is relevant but RAG is not triggered  
+
 - **Retrieval (Recall)**
-  - `TOPK_RECALL_FAILED`: Question is **answerable** from knowledge base, system finds knowledge base relevant to the question (use_rag = `True`), however, topk chunks does not contain the **gold_chunk**.
-- **Abstain issue (Grounding / Abstention)**
-  - `SHOULD_ABSTAIN_BUT_ANSWERED`: Given by the query is **not answerable** from knowledge base, system finds knowledge base relevant (use_rag = `True`) and sends the context to LLM, however LLM ends up answering questions without saying "I don't know".
-  - `SHOULD_ANSWERED_BUT_ABSTAIN`: Given by the query is **answerable** from knowledge base, system finds knowledge base relevant (use_rag = `True`) and sends the context to LLM, however, LLM replys "I don't know".  
+  - `TOPK_RECALL_FAILED`: Gold chunk is not present in top-k results  
+
+- **Grounding / Abstention**
+  - `SHOULD_ABSTAIN_BUT_ANSWERED`: Hallucination (answer without support)  
+  - `SHOULD_ANSWER_BUT_ABSTAINED`: False abstention (missed answer)  
+
 - **Answer Correctness**
-  - `answer_correct`: system provides the correct expected answer. (So far this metric is tagged manually, will use `llm_as_judge` in the future iteration.)
+  - `answer_correct`: correctness of final answer (manual labeling; LLM-as-judge planned)
 
 ---
-### 10. Evaluation - Per-Case Breakdown
-Below are a few interesting and valuable result data that reflects the potential failures of current system:  
-1. This failure type is **should_answer_but_abstained**, given by gating, top1 and topk_recall are all correct. Which means this could be LLM issue.
+### 10. Evaluation - System Evolution
+
+#### Iteration I: Keyword-based Retrieval (Baseline)
+
+Keyword-based retrieval reveals several limitations:  
+
+- Gating false negatives due to low lexical overlap  
+- Sensitivity to query phrasing and typos  
+- Imperfect **top-k recall** and **top-1 ranking issue**    
+
+Example failure:
+- “what about Satuarday?” → gating fails due to spelling variation  
+- “how long does delivery usually take?” → top-1 ranking issue
+
+**Conclusion:**
+> The main bottleneck in Iteration I is retrieval quality and gating sensitivity.
+
+---
+
+#### Iteration II: Embedding-based Retrieval
+
+Replacing keyword retrieval with embedding-based semantic retrieval leads to:
+
+- Top-1 accuracy ≈ 1.0  
+- Top-k recall ≈ 1.0  
+- Gating accuracy significantly improved  
+
+This effectively resolves retrieval-related failures.
+
+--- 
+
+#### Embedding-based Retrieval Threshold Tuning
+
+We performed a simple threshold sweep on the embedding-based retrieval system. Gating threshold ranges from [0.3, 0.35, 0.4, 0.45]
+
+Results show:
+
+- Lower threshold 0.3 achieves the best overall performance  
+- Higher thresholds introduce more gating false negatives  
+- At high threshold 0.45, hallucination starts to appear due to increased fallback to LLM  
+
+Interestingly, false abstention remains constant across thresholds, indicating that:
+
+> the remaining errors are not caused by retrieval or gating, but by generation limitations.
+
+---
+
+**Conclusion:**  
+We ended up selecting `gating_threshold = 0.3` as it provides the best tradeoff between recall and hallucination.
+
+---
+
+#### Case review
+
+In this case, the system correctly identifies the relevant knowledge and triggers RAG. However, the model still responds with *"I don't know."*.
+
+This illustrates an important limitation:
+
+> **Relevance does not guarantee answerability.**
+
+Although the retrieved chunk is highly relevant, the answer is not explicitly stated in the knowledge base and requires simple reasoning (e.g., negation). Due to strict grounding constraints, the model abstains instead of answering.
+
+This type of failure motivates the next iteration, where we will introduce **LLM-based answer grounding / answerability checks** to better handle implicitly answerable queries.
+
 ```json
 {
   "query": "can customer return items without a receipt ?", 
-  "expected": {
-    "answerable_from_kb": true, 
-    "expected_use_rag": true, 
-    "should_answer_from_kb": true, 
-    "should_abstain": false
+  "retrieval": {
+    "mode": "embedding", 
+    "threshold": 0.3, 
+    "use_rag": true, 
+    "top-k": 2, 
+    "top_chunks": ["Return Policy: Customers can return items within 7 days with a receipt.", "Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed."], "top_scores": [0.6268515496496546, 0.23584901986657547], 
+    "top1_chunk": "Return Policy: Customers can return items within 7 days with a receipt.", 
+    "top1_score": 0.6268515496496546, 
+    "top2_chunk": "Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed.", 
+    "top2_score": 0.23584901986657547, 
+    "top1_top2_gap": 0.39100252978307914
     }, 
-  "actual": {
-    "actual_use_rag": true, 
-    "abstained": true
+  "response": {
+    "reply": "I don't know.", 
+    "mode": "rag"
     }, 
-  "result": {
-    "gating_correct": true, 
-    "top1_correct": true, 
-    "topk_recall": true,  
-    "should_abstain_but_answered": false, 
-    "should_answer_but_abstained": true
-    },
-  "generation": {
-    "answer_correct": false
-    },
-  "failure_type": "should_answer_but_abstained"
+  "error": null
 }
 ```
-
-2. This question follows a question **"what time does store open on Sunday ?"**. Given by the context, LLM should understand that user is asking the open time of the store on Satuarday. However, due to the keyword overlap matching limitation in the current RAG retrieving logic, system failed to determine the relevancy of this question with knowledge base. Gating failed, top1 and topk_recall both failed, thus fallback to LLM mode. This is a **gating_false_negative** failure.  
-**Short or misspelled queries can cause keyword-based retrieval scores to drop below the gating threshold, leading to false negatives even when the query is answerable from the KB.**
-```json
-{
-  "query": "what about Satuarday ?", 
-  "expected": {
-    "answerable_from_kb": true, 
-    "expected_use_rag": true, 
-    "should_answer_from_kb": true, 
-    "should_abstain": false
-    }, 
-  "actual": {
-    "actual_use_rag": false, 
-    "abstained": false
-    }, 
-  "result": {
-    "gating_correct": false, 
-    "top1_correct": false, 
-    "topk_recall": false, 
-    "should_abstain_but_answered": false, 
-    "should_answer_but_abstained": false
-    }, 
-  "generation": {
-    "answer_correct": false
-    }, 
-  "failure_type": "gating_false_negative"
-}
-
-```
-3. This example falls into **top1_ranking_failure** issue. Although top1 chunk is not the gold chunk, however, topk_recall is true, which means gold chunk is retrieved within topk chunks, therefore LLM is able to provide the correct answer.
-```json
-{
-  "query": "how much discount can a member get ?",
-  "expected": {
-    "answerable_from_kb": true, 
-    "expected_use_rag": true, 
-    "should_answer_from_kb": true, 
-    "should_abstain": false
-    }, 
-  "actual": {
-    "actual_use_rag": true, 
-    "abstained": false
-    }, 
-  "result": {
-    "gating_correct": true, 
-    "top1_correct": false, 
-    "topk_recall": true,
-    "should_abstain_but_answered": false, 
-    "should_answer_but_abstained": false
-    }, 
-  "generation": {
-    "answer_correct": null
-    }, 
-  "failure_type": "top1_ranking_failed"
-}
-
-```
-4. This question is a out-of-scope query. There is no gold chunk. Therefore the top1_correct and topk_recall are set to None. RAG retrieves the incorrect chunks, however, due to the low score, gating succcessfully rejected it. In other words, retrieval produced unuseful evidence, but gating correctly rejected it.
-```json
-{
-  "query": "what products do you sell ?", 
-  "expected": {
-    "answerable_from_kb": false, 
-    "expected_use_rag": false, 
-    "should_answer_from_kb": false,
-    "should_abstain": false
-    }, 
-  "actual": {
-    "actual_use_rag": false, 
-    "abstained": false
-    }, 
-  "result": {
-    "gating_correct": true, 
-    "top1_correct": null, 
-    "topk_recall": null, 
-    "should_abstain_but_answered": false,  
-    "should_answer_but_abstained": false  
-    }, 
-  "generation": {
-    "answer_correct": null
-    }, 
-  "failure_type": "none"
-}
-```
-5. This question falls into **gating_false_negative** failure. But it reflects a very critical and interesting issue within the current system. Notice topk_recall is true, however, the top1 chunk is false. And actual_use_rag is set to false. The reason is that current RAG uses only top1 score to compare the threshold when gating. **Some false negatives occur even when top-k recall succeeds, because the gating decision depends only on the top-1 score. This suggests improving the gating strategy or using semantic retrieval.**
-```json
-{
-  "query": "how long does delivery usually take ?", 
-  "expected": {
-    "answerable_from_kb": true, 
-    "expected_use_rag": true, 
-    "should_answer_from_kb": true, 
-    "should_abstain": false  
-    }, 
-  "actual": {
-    "actual_use_rag": false, 
-    "abstained": false
-    }, 
-  "result": {
-    "gating_correct": false, 
-    "top1_correct": false, 
-    "topk_recall": true, 
-    "should_abstain_but_answered": false, 
-    "should_answer_but_abstained": false  
-    }, 
-  "generation": {
-    "answer_correct": null
-    }, 
-  "failure_type": "gating_false_negative"
-}
-
-```
-6. This is a typical **hallucination problem**. Question is not answerable from the knowledge base however the system falls back to LLM model (`actual_use_rag == False`) and LLM hallucinated.
-```json
-{
-  "query": "is VIP customer eligible for free returns ?", 
-  "expected": {
-    "answerable_from_kb": false, 
-    "expected_use_rag": true, 
-    "should_answer_from_kb": false, 
-    "should_abstain": true
-    }, 
-  "actual": {
-    "actual_use_rag": false, 
-    "abstained": false
-    }, 
-  "result": {
-    "gating_correct": false, 
-    "top1_correct": null, 
-    "topk_recall": null, 
-    "should_abstain_but_answered": true, 
-    "should_answer_but_abstained": false
-    }, 
-  "generation": {
-    "answer_correct": null
-    }, 
-  "failure_type": ["gating_false_negative", "should_abstain_but_answered"]
-}
-
-```
----
-### 11. Evaluation - Summary Insight (Metrics Aggregation)
-From below summary data, we could find valuable insights of current system potential issues:
-1. The system suffers from **gating false negatives**, where relevant queries fail to trigger retrieval due to low keyword matching scores.  
-2. Topk retrieval recall is relatively strong, indicating that the knowledge base contains sufficient information and can be retrieved when triggered.  
-3. Top1 chunk ranking issues reduce the effectiveness of retrieval, as relevant chunks are often not ranked at the top.  
-4. The system effectively avoids hallucination in most cases by abstaining when information is insufficient.
-
-
-Based on the evaluation, the main bottleneck is **keyword-based retrieval** and **gating sensitivity**.  In the next iteration, I plan to introduce embedding-based retrieval to *improve semantic matching* and reduce gating false negatives.
-
-```json
-{
-  "total_cases": 22, 
-  "counts": {
-    "gating_correct": 16, 
-    "top1_correct": 10, 
-    "top1_valid": 16, 
-    "topk_recall": 13, 
-    "topk_valid": 16, 
-    "should_abstain": 5, 
-    "correct_abstain": 4, 
-    "should_answer": 16, 
-    "false_abstain": 1, 
-    "hallucination": 1
-    }, 
-  "rates": {
-    "gating_accuracy": 0.7273, 
-    "top1_accuracy": 0.625, 
-    "topk_recall_rate": 0.8125, 
-    "correct_abstain_rate": 0.8, 
-    "false_abstain_rate": 0.0625, 
-    "hallucination_rate": 0.2
-    }, 
-  "failure_counts": {
-    "gating_false_negative": 6, 
-    "topk_recall_failed": 3, 
-    "top1_ranking_failed": 6, 
-    "should_answer_but_abstained": 1, 
-    "should_abstain_but_answered": 1
-    }
-}
-
-```
-
 ---
 
 ## Why This Design?
