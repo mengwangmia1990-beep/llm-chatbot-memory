@@ -1,5 +1,7 @@
 # rag.py
 import config
+import embedding_utils
+import math
 
 # Load and clean knowledge data
 def load_knowledge(filepath="knowledge.txt"):
@@ -66,8 +68,57 @@ def retrieve_keyword(query, knowledge, top_k=2):
 
 
 def embed_knowledge(knowledge):
-    return None
+    vectors = []
+    if knowledge and len(knowledge) > 0:
+        for chunk in knowledge:
+            vector = embedding_utils.embed_text(chunk)
+            if vector and len(vector) > 0:
+                vectors.append({
+                    "vector": vector,
+                    "chunk": chunk
+                })
 
+    return vectors
+
+def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+
+    return dot_product / (norm1 * norm2)
 
 def retrieve_embedding(query, embedded_knowledge, top_k=2):
-    return None
+    query_vector = embedding_utils.embed_text(query)
+    scored_chunks = []
+    
+    if query_vector and len(query_vector) > 0:
+        for doc in embedded_knowledge:
+            score = cosine_similarity(query_vector, doc["vector"])
+            scored_chunks.append({
+                "chunk": doc["chunk"],
+                "score": score
+            })
+
+    # sort score by decreasing order
+    scored_chunks.sort(key=lambda x: x["score"], reverse=True)
+
+    # select topk
+    candidate_chunks = scored_chunks[:top_k]
+
+    # Threshold Gating
+    top_scores = [item["score"] for item in candidate_chunks]
+    top_chunks = [item["chunk"] for item in candidate_chunks]
+    top_score = top_scores[0] if top_scores else 0.0
+
+    use_rag = top_score >= config.RAG_RELEVANCE_EMBEDDING_THRESHOLD
+
+    return {
+        "top_chunks": top_chunks,
+        "top_scores": top_scores,
+        "top_score": top_score,
+        "use_rag": use_rag
+    }

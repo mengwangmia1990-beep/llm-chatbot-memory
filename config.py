@@ -10,6 +10,7 @@ SHORT_TERM_TURN = 2
 SHORT_TERM_MESSAGES = SHORT_TERM_TURN * 2
 
 RAG_RELEVANCE_THRESHOLD = 0.1
+RAG_RELEVANCE_EMBEDDING_THRESHOLD = 0.5 # TODO: needs tuning based on the eval_data set
 
 LOG_DIR = "logs"
 TRACE_FILE_NAME = "trace_log.jsonl"
