@@ -12,7 +12,12 @@ OUTPUT_SUMMARY_FILE = os.path.join(EVAL_DIR, config.EVAL_SUMMARY_FILE)
 
 # load knowledge base
 knowledge = rag.load_knowledge()
+
+# pre-embedd knowledge
+embedded_knowledge = rag.embed_knowledge(knowledge)
+
 messages = [system_message]
+retrieve_mode = config.RETRIEVE_MODE_EMBEDDING
 
 def main():
     with open(EVAL_DATA_FILE) as f:
@@ -23,19 +28,19 @@ def main():
             print(query)
 
             # call generate_reply for keyword retrieve mode
-            reply, rag_result = generate_reply(query, knowledge, messages, config.RETRIEVE_MODE_KEYWORD)
+            # reply, rag_result = generate_reply(query, knowledge, messages, config.RETRIEVE_MODE_KEYWORD)
 
             # TODO: call generate_reply for embedding retrieve mode
-            # reply, rag_result = generate_reply(query, knowledge, messages, config.RETRIEVE_MODE_EMBEDDING)
+            reply, rag_result = generate_reply(query, knowledge, embedded_knowledge, messages, retrieve_mode)
 
             print(reply)
             print()
             
             # output trace (runtime logging)
-            set_trace(query, rag_result, reply)
+            set_trace(query, rag_result, retrieve_mode, reply)
 
             # output evaluation report
-            set_eval_report(query, data, rag_result, reply)
+            set_eval_report(query, data, rag_result, reply, retrieve_mode)
 
     
     # aggregate metrics
@@ -150,7 +155,7 @@ def aggregate_metrics():
         f.write(json.dumps(summary, ensure_ascii=False) + "\n")
         
 
-def set_eval_report(query, data, rag_result, reply):
+def set_eval_report(query, data, rag_result, reply, retrieve_mode):
     EVAL_DIR = config.EVAL_DIR
     LOG_FILE = os.path.join(EVAL_DIR, config.EVAL_REPORT_FILE)
     os.makedirs(EVAL_DIR, exist_ok=True)
@@ -185,6 +190,7 @@ def set_eval_report(query, data, rag_result, reply):
 
     eval_report = {
         "query": query,
+        "retrieve_mode": retrieve_mode,
 
         "expected": {
             "answerable_from_kb": answerable_from_kb,

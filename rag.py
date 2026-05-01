@@ -80,6 +80,7 @@ def embed_knowledge(knowledge):
 
     return vectors
 
+
 def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     dot_product = sum(a * b for a, b in zip(vec1, vec2))
 
