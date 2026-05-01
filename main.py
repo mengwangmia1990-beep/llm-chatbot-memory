@@ -61,7 +61,7 @@ def main():
 
         if reply is None:
             # rollback没成功的用户问题
-            set_trace(user_input, rag_result, reply, "llm_failed")
+            set_trace(user_input, rag_result, retrieve_mode, reply, "llm_failed")
             continue
 
         # attach user history
@@ -81,6 +81,7 @@ def main():
 
         print("AI: ", reply)
         print("==========================================================================")
+
 
 def set_trace(user_input, result, retrieve_mode, reply, error=None):
     LOG_DIR = config.LOG_DIR
@@ -108,6 +109,7 @@ def set_trace(user_input, result, retrieve_mode, reply, error=None):
     # output metrics
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(trace, ensure_ascii=False) + "\n")
+
 
 def context_management(messages):
     if len(messages) > config.MAX_MESSAGES + 1:
@@ -159,6 +161,7 @@ def context_management(messages):
 
     return messages
 
+
 def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode):
     if retrieve_mode == config.RETRIEVE_MODE_KEYWORD:
         result = rag.retrieve_keyword(user_input, knowledge)
@@ -176,6 +179,7 @@ def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve
         response = llm.call_llm(messages + user_messages)
 
     return response, result
+
 
 def build_rag_messages(result, user_input):
     prompt = [{
@@ -196,6 +200,7 @@ def build_rag_messages(result, user_input):
         """
     }]
     return prompt
+
 
 if __name__ == "__main__":
     main()
