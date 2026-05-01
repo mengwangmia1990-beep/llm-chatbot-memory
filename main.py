@@ -27,7 +27,7 @@ def main():
         system_message
     ]
 
-    retrieve_mode = config.RETRIEVE_MODE_KEYWORD
+    retrieve_mode = config.RETRIEVE_MODE_EMBEDDING
 
     # pre-load knowledge
     knowledge = rag.load_knowledge()
