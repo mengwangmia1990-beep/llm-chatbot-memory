@@ -11,3 +11,5 @@ test/
 
 evaluation/eval_report.jsonl
 evaluation/eval_summary.jsonl
+evaluation/eval_embedding_threshold_report.jsonl
+evaluation/eval_embedding_threshold_summary.jsonl

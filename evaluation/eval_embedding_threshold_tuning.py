@@ -1,15 +1,21 @@
+import os
+import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJECT_ROOT)
+
 import json
 import config
-import os
 import rag
 from main import generate_reply, system_message, set_trace
 from common import enums
 from collections import defaultdict
 
-EVAL_DIR = config.EVAL_DIR
-EVAL_DATA_FILE = os.path.join(EVAL_DIR, config.EVAL_DATA_FILE)
-EVAL_REPORT_FILE = os.path.join(EVAL_DIR, config.EVAL_REPORT_FILE)
-OUTPUT_SUMMARY_FILE = os.path.join(EVAL_DIR, config.EVAL_SUMMARY_FILE)
+EVAL_DIR = os.path.join(PROJECT_ROOT, config.EVAL_DIR) # evaluation/
+EVAL_DATA_FILE = os.path.join(EVAL_DIR, config.EVAL_DATA_FILE) # evaluation/eval_data.jsonl
+
+EVAL_REPORT_FILE = os.path.join(EVAL_DIR, "eval_embedding_threshold_report.jsonl")
+OUTPUT_SUMMARY_FILE = os.path.join(EVAL_DIR, "eval_embedding_threshold_summary.jsonl")
 
 # load knowledge base
 knowledge = rag.load_knowledge()
@@ -21,6 +27,11 @@ messages = [system_message]
 retrieve_mode = config.RETRIEVE_MODE_EMBEDDING
 
 def main():
+
+    # clean previous evaluation round
+    open(EVAL_REPORT_FILE, "w", encoding="utf-8").close()
+    open(OUTPUT_SUMMARY_FILE, "w", encoding="utf-8").close()
+
     for gating in config.RAG_RELEVANCE_EMBEDDING_THRESHOLD_TREATMENTS:
         with open(EVAL_DATA_FILE) as f:
             for line in f:
@@ -29,17 +40,13 @@ def main():
                 query = data["query"]
                 print(query)
 
-                # call generate_reply for keyword retrieve mode
-                # reply, rag_result = generate_reply(query, knowledge, messages, config.RETRIEVE_MODE_KEYWORD)
-
-                # TODO: call generate_reply for embedding retrieve mode
-                reply, rag_result = generate_reply(query, knowledge, embedded_knowledge, messages, retrieve_mode, gating)
+                reply, rag_result, grounding_response = generate_reply(query, knowledge, embedded_knowledge, messages, retrieve_mode, gating)
 
                 print(reply)
                 print()
                 
                 # output trace (runtime logging)
-                set_trace(query, rag_result, retrieve_mode, reply, None, gating)
+                set_trace(query, rag_result, retrieve_mode, reply, grounding_response, gating, None)
 
                 # output evaluation report
                 set_eval_report(query, data, rag_result, reply, retrieve_mode, gating)
@@ -161,8 +168,7 @@ def aggregate_metrics():
         
 
 def set_eval_report(query, data, rag_result, reply, retrieve_mode, gating=0.0):
-    EVAL_DIR = config.EVAL_DIR
-    LOG_FILE = os.path.join(EVAL_DIR, config.EVAL_REPORT_FILE)
+    LOG_FILE = EVAL_REPORT_FILE
     os.makedirs(EVAL_DIR, exist_ok=True)
 
     answerable_from_kb = data["answerable_from_kb"]

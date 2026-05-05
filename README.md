@@ -4,10 +4,11 @@
 This project is a CLI-based conversational assistant powered by the OpenAI API.
 
 It supports multi-turn dialogue with hybrid memory (short-term + summarized long-term), 
-a lightweight Retrieval-Augmented Generation (RAG) pipeline, and a structured evaluation framework for analyzing system performance.
+a lightweight Retrieval-Augmented Generation (RAG) pipeline with answer grounding checker and a structured evaluation framework for analyzing system performance.
 
 The system follows a **hybrid answering strategy**:
-- When relevant knowledge is retrieved, responses are grounded using RAG
+- When relevant knowledge is retrieved, if responses are grounded by grounding checker (powered by LLM), then use RAG
+  
 - Otherwise, the system falls back to the base LLM
 
 In addition, the project includes an **evaluation pipeline** that measures system performance across routing, retrieval, and generation, enabling systematic failure analysis and iterative improvement.
@@ -19,6 +20,7 @@ In addition, the project includes an **evaluation pipeline** that measures syste
 - Multi-turn conversation with LLM
 - Hybrid memory (short-term + long-term summarized memory)
 - Retrieval-Augmented Generation (RAG) with keyword-based and embedding-based retrieval (iteration II)  
+- Answer Grounding Checker with structured output (iteration III)  
 - Threshold-based RAG gating (dynamic routing between RAG and LLM)
 - Hybrid answering strategy (grounded + fallback responses)
 - Rule-based safety filtering
@@ -66,7 +68,7 @@ In addition, the project includes an **evaluation pipeline** that measures syste
 
 User Input  
 → Input Validation & Safety Filtering  
-→ Retrieval & Gating (routing RAG or LLM path)  
+→ Retrieval, Gating & Grounding (routing RAG or LLM path)  
 → Prompt Construction (inject RAG context if applicable)  
 → LLM Inference  
 → Update Conversation State (append user & assistant messages)    
@@ -87,8 +89,11 @@ The system supports two retrieval strategies:
 - **Embedding-based retrieval (Iteration II)**
   - Uses semantic similarity (cosine similarity on embeddings)
   - More robust to paraphrasing and natural language variation
+- **Embedding-based retrieval + Answer Grounding (Iteration III)**
+  - Uses LLM-as-Judege to ground answerability of user question
+  - If judge identifies question answerable, then proceed with RAG mode; otherwise, fallback to LLM mode
 
-Both strategies share a unified RAG pipeline:
+All above iterations share a unified RAG pipeline:
 
 - Top-k chunks are retrieved from the knowledge base  
 - A relevance gating mechanism determines whether to trigger RAG  
@@ -169,6 +174,13 @@ Each interaction is logged as structured JSON (JSONL format):
     "reply": "...",
     "mode": "rag"
   },
+  "grounding":{
+    "answerable": true/false,
+    "supported_answer": "...",
+    "answer_type": ["direct", "negative", "partial", "not_answerable"],
+    "reason": "...",
+    "evidence": "..."
+  }
   "error": "..."
 }
 ```
@@ -308,13 +320,8 @@ This type of failure motivates the next iteration, where we will introduce **LLM
 
 ## Future Improvements
 
-### Iteration II: Embedding-based RAG
-- Replace keyword-based retrieval with embedding-based semantic retrieval
-- Compare keyword retrieval vs. embedding retrieval using the existing evaluation pipeline
-- Measure improvements in gating accuracy, top-k recall, and false negative rate
-
 ### Iteration III: Answer Quality & Grounding
-- Introduce LLM-as-judge to evaluate answer correctness and groundedness
+- Introduce LLM-as-judge to evaluate answer groundedness  
 - Add structured output using JSON schema
 - Add answer verification to reduce unsupported or hallucinated responses
 
