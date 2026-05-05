@@ -57,7 +57,7 @@ def main():
                 print(f"AI: This issue involves {category}, I cannot answer it.")
                 continue
 
-        reply, rag_result = generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode)
+        reply, rag_result, grounding_response = generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode)
 
         if reply is None:
             # rollback没成功的用户问题
@@ -67,7 +67,8 @@ def main():
         # attach user history
         messages.append(
             {"role": "user", "content": user_input}
-            )
+        
+        )
         # attach assistant history
         messages.append(
             {"role": "assistant", "content": reply}
@@ -77,20 +78,19 @@ def main():
         messages = context_management(messages)
 
         # set trace and output to json file for observation
-        set_trace(user_input, rag_result, retrieve_mode, reply)
+        set_trace(user_input, rag_result, retrieve_mode, reply, grounding_response)
 
         print("AI: ", reply)
         print("==========================================================================")
 
 
-def set_trace(user_input, result, retrieve_mode, reply, error=None, gating=0.0):
+def set_trace(user_input, result, retrieve_mode, reply, grounding=None, gating=None, error=None):
     LOG_DIR = config.LOG_DIR
-    LOG_FILE = os.path.join(LOG_DIR, config.TRACE_FILE_NAME)
-    os.makedirs(LOG_DIR, exist_ok=True)
+    LOG_FILE = os.path.join(LOG_DIR, config.TRACE_FILE_NAME) 
 
     gating_threshold = config.RAG_RELEVANCE_THRESHOLD
     if retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
-        if gating != 0.0:
+        if gating != None:
             gating_threshold = gating # embedding gating threshold tuning treatments
         else:
             gating_threshold = config.RAG_RELEVANCE_EMBEDDING_THRESHOLD
@@ -118,6 +118,7 @@ def set_trace(user_input, result, retrieve_mode, reply, error=None, gating=0.0):
             "reply": reply,
             "mode": "rag" if result["use_rag"] else "llm"
         },
+        "grounding": grounding.model_dump() if grounding else None,
         "error": error
     }
     
@@ -183,39 +184,144 @@ def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve
     elif retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
         result = rag.retrieve_embedding(user_input, embedded_knowledge, config.TOPK, gating)
     
+    fallback_to_llm = True
+    grounding_response = None
+    
     if result["use_rag"]: # routing
-        rag_prompt = build_rag_messages(result, user_input)
-        response = llm.call_llm(messages + rag_prompt)
-    else:
-        # Call LLM model and collect response
+        # answerability/grounding check
+        grounding_prompt = build_grounding_prompt(result, user_input)
+
+        # send to llm for grounding check
+        grounding_response = llm.call_llm_structured_output(messages + grounding_prompt)
+
+        # answerable --> use RAG
+        if grounding_response is not None and grounding_response.answerable == True:
+            fallback_to_llm = False
+
+            # build rag message along with supported answer
+            rag_prompt = build_rag_messages(result, user_input, grounding_response)
+
+            # send to llm
+            response = llm.call_llm(messages + rag_prompt)
+
+    # fallback to llm mode when RAG is not available
+    if fallback_to_llm == True:
         user_messages = [
             {"role": "user", "content": user_input}
         ]
         response = llm.call_llm(messages + user_messages)
 
-    return response, result
+    return response, result, grounding_response
 
 
-def build_rag_messages(result, user_input):
+def build_grounding_prompt(result, user_input):
+    context = "\n\n".join(result["top_chunks"])
+
+    return [
+        {
+            "role": "system",
+            "content": """
+            You are a grounding checker for a RAG system.
+
+            Your job is to determine whether the context supports a faithful answer to the user's question.
+
+            You must first identify the answer that is supported by the context, then decide whether it answers the user's question.
+
+            Important:
+            - A faithful answer can be affirmative or negative.
+            - Negative answers are valid answers.
+            - If the user asks for a value such as time, price, availability, permission, eligibility, or existence, and the context says it is unavailable, closed, not allowed, not eligible, unsupported, absent, or does not exist, then the question is answerable with a negative answer.
+            - Do not require the context to contain the exact type of value requested if the context clearly negates the premise of the question.
+            - Do not use outside knowledge.
+            """
+        },
+        {
+            "role": "user",
+            "content": f"""
+            Question:
+            {user_input}
+
+            Context:
+            {context}
+
+            Decide whether the context supports a faithful answer.
+
+            Return:
+            - answerable=true if the context supports a complete answer.
+            - answer_type="direct" if the context provides the requested value directly.
+            - answer_type="negative" if the context negates the premise of the question.
+            - answer_type="partial" if the context is related but incomplete.
+            - answer_type="not_answerable" if the context is unrelated or insufficient.
+            - supported_answer should be the answer that can be given using only the context.
+            - If answerable=false, supported_answer and evidence must be empty.
+            - Evidence must be an exact quote from the context.
+
+            Examples:
+            Question: What time does the store open on Sunday?
+            Context: Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed.
+            Output:
+            {{
+            "answerable": true,
+            "answer_type": "negative",
+            "supported_answer": "The store is closed on Sunday, so it does not open that day.",
+            "reason": "The context negates the premise that the store opens on Sunday.",
+            "evidence": "Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed."
+            }}
+
+            Question: What time does the store open on Monday?
+            Context: Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed.
+            Output:
+            {{
+            "answerable": true,
+            "answer_type": "direct",
+            "supported_answer": "The store opens at 9am on Monday.",
+            "reason": "The context provides Monday business hours.",
+            "evidence": "Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed."
+            }}
+
+            Question: Do members get free shipping?
+            Context: Membership Policy: Members get a 10% discount.
+            Output:
+            {{
+            "answerable": false,
+            "answer_type": "not_answerable",
+            "supported_answer": "",
+            "reason": "The context does not provide shipping options for members.",
+            "evidence": ""
+            }}
+            """
+        }]
+
+def build_rag_messages(result, user_input, grounding_response):
+    context = "\n\n".join(result["top_chunks"])
+
     prompt = [{
         "role": "user",
         "content": f"""
-            Use the following knowledge to answer the question.
+        Use the provided knowledge to answer the user's question.
 
-            Rules:
-            - Use the provided knowledge as the primary source
-            - If the answer is not in the knowledge, say "I don't know"
-            - Do not invent or hallucinate any information
+        A grounding checker has already identified a supported answer.
 
-            Knowledge: 
-            {"\n\n".join(result["top_chunks"])}
+        Supported answer:
+        {grounding_response.supported_answer}
 
-            Question:
-            {user_input}
+        Rules:
+        - Use the provided knowledge as the primary source.
+        - Use the supported answer as the basis of your response.
+        - Do not contradict the supported answer.
+        - If the supported_answer is empty or not supported by the knowledge, say "I don't know".
+        - Do not hallucinate or invent any information.
+        - Answer naturally and concisely.
+
+        Knowledge:
+        {context}
+
+        Question:
+        {user_input}
         """
     }]
-    return prompt
 
+    return prompt
 
 if __name__ == "__main__":
     main()
