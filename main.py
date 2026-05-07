@@ -28,6 +28,7 @@ def main():
     ]
 
     retrieve_mode = config.RETRIEVE_MODE_EMBEDDING
+    generation_mode = config.GENERATION_MODE_GROUNDING
 
     # pre-load knowledge
     knowledge = rag.load_knowledge()
@@ -57,7 +58,8 @@ def main():
                 print(f"AI: This issue involves {category}, I cannot answer it.")
                 continue
 
-        reply, rag_result, grounding_response = generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode)
+        reply, rag_result, grounding_response = generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode, generation_mode)
+        answerable = grounding_response.answerable
 
         if reply is None:
             # rollback没成功的用户问题
@@ -86,7 +88,7 @@ def main():
 
 def set_trace(user_input, result, retrieve_mode, reply, grounding=None, gating=None, error=None):
     LOG_DIR = config.LOG_DIR
-    LOG_FILE = os.path.join(LOG_DIR, config.TRACE_FILE_NAME) 
+    LOG_FILE = os.path.join(LOG_DIR, config.TRACE_FILE_NAME)
 
     gating_threshold = config.RAG_RELEVANCE_THRESHOLD
     if retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
@@ -178,7 +180,7 @@ def context_management(messages):
     return messages
 
 
-def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode, gating=0.0):
+def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode, generation_mode, gating=0.0):
     if retrieve_mode == config.RETRIEVE_MODE_KEYWORD:
         result = rag.retrieve_keyword(user_input, knowledge)
     elif retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
@@ -188,21 +190,21 @@ def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve
     grounding_response = None
     
     if result["use_rag"]: # routing
-        # answerability/grounding check
-        grounding_prompt = build_grounding_prompt(result, user_input)
-
-        # send to llm for grounding check
-        grounding_response = llm.call_llm_structured_output(messages + grounding_prompt)
-
-        # answerable --> use RAG
-        if grounding_response is not None and grounding_response.answerable == True:
+        if generation_mode == config.GENERATION_MODE_RELEVANCE:
+            # if relevant --> use RAG
             fallback_to_llm = False
-
-            # build rag message along with supported answer
-            rag_prompt = build_rag_messages(result, user_input, grounding_response)
-
-            # send to llm
+            rag_prompt = build_rag_messages(result, user_input)
             response = llm.call_llm(messages + rag_prompt)
+
+        elif generation_mode == config.GENERATION_MODE_GROUNDING:
+            grounding_prompt = build_grounding_prompt(result, user_input)
+            grounding_response = llm.call_llm_structured_output(messages + grounding_prompt)
+
+            # if answerable --> use RAG
+            if grounding_response is not None and grounding_response.answerable == True:
+                fallback_to_llm = False
+                rag_prompt = build_rag_messages_grounding(result, user_input, grounding_response)
+                response = llm.call_llm(messages + rag_prompt)
 
     # fallback to llm mode when RAG is not available
     if fallback_to_llm == True:
@@ -292,7 +294,7 @@ def build_grounding_prompt(result, user_input):
             """
         }]
 
-def build_rag_messages(result, user_input, grounding_response):
+def build_rag_messages_grounding(result, user_input, grounding_response):
     context = "\n\n".join(result["top_chunks"])
 
     prompt = [{
@@ -321,6 +323,26 @@ def build_rag_messages(result, user_input, grounding_response):
         """
     }]
 
+    return prompt
+
+def build_rag_messages(result, user_input):
+    prompt = [{
+        "role": "user",
+        "content": f"""
+            Use the following knowledge to answer the question.
+
+            Rules:
+            - Use the provided knowledge as the primary source
+            - If the answer is not in the knowledge, say "I don't know"
+            - Do not invent or hallucinate any information
+
+            Knowledge: 
+            {"\n\n".join(result["top_chunks"])}
+
+            Question:
+            {user_input}
+        """
+    }]
     return prompt
 
 if __name__ == "__main__":

@@ -306,6 +306,81 @@ This type of failure motivates the next iteration, where we will introduce **LLM
   "error": null
 }
 ```
+
+#### Iteration III: Answer Grounding Checker  
+Iteration II revealed an important issue:
+
+> relevance != answerability  
+
+Even when retrieved knowledge is relevant to the query, the knowledge base may still not contain enough information to answer the question correctly.
+
+To address this issue, we introduced an **answer grounding checker** to verify:
+
+> Given the retrieved knowledge, is this question truly answerable from the KB?
+
+We conducted a side-by-side evaluation between:  
+- iteration II (embedding RAG without grounding)
+- iteration III (with grounding). Below are the evaluation results:  
+
+```json
+{
+  "total_cases": 22,
+  "without_grounding": {
+    "should_abstain_but_answered_rate": 0.0,
+    "false_abstain_rate": 0.09090909090909091
+  },
+  "with_grounding": {
+    "should_abstain_but_answered_rate": 0.18181818181818182,
+    "false_abstain_rate": 0.0
+  },
+  "comparison": {
+    "should_abstain_but_answered_delta": 4,
+    "false_abstain_delta": -2,
+    "grounding_correct_rate": 0.7727272727272727
+  }
+}
+```
+Results show that introducing the grounding checker successfully reduced the `false_abstain_rate` to zero. The system became more willing to answer questions when sufficient KB evidence existed.
+
+However, the evaluation also revealed a new issue:
+
+> unsupported answer / hallucination rate increased significantly
+
+The grounding checker sometimes incorrectly interpreted **non-mentioned information** as a **negative answer**.
+
+Expected behavior is "I don't know". This indicates that the current answer grounding checker is still somehow **over-confident** when handling non-mentioned information.
+
+```json
+{
+  "query": "can customers return items broken ?",
+  "retrieve_mode": "embedding",
+  "expected": {
+    "relevant": true,
+    "answerable": false,
+    "gold_answer": "I don't know."
+  },
+  "with_grounding": {
+    "answerable": true,
+    "reply": "Customers cannot return broken items as there is no mention of returning broken items in the return policy.",
+    "abstained": false,
+    "should_abstain_but_answered": true,
+    "should_answer_but_abstained": false
+  },
+  "without_grounding": {
+    "reply": "I don't know.",
+    "abstained": true,
+    "should_abstain_but_answered": false,
+    "should_answer_but_abstained": false
+  },
+  "comparison": {
+    "grounding_correct": false,
+    "grounding_reduced_unsupported_answer": false,
+    "grounding_caused_false_abstain": false
+  }
+}
+```  
+
+
 ---
 
 ## Why This Design?
