@@ -306,6 +306,7 @@ This type of failure motivates the next iteration, where we will introduce **LLM
   "error": null
 }
 ```
+---
 
 #### Iteration III: Answer Grounding Checker  
 Iteration II revealed an important issue:
