@@ -1,6 +1,9 @@
 RETRIEVE_MODE_KEYWORD = "keyword"
 RETRIEVE_MODE_EMBEDDING = "embedding"
 
+GENERATION_MODE_RELEVANCE = "relevance"
+GENERATION_MODE_GROUNDING = "grounding"
+
 MODEL_NAME = "gpt-4o-mini"
 EMBEDDING_MODEL_NAME = "text-embedding-3-small"
 
