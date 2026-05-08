@@ -379,7 +379,69 @@ Expected behavior is "I don't know". This indicates that the current answer grou
     "grounding_caused_false_abstain": false
   }
 }
-```  
+```
+---
+
+#### Iteration 3.1: Answer Grounding Prompt Adjustment
+We updated the answer grounding prompt to as follows:
+```json
+{
+  "role": "system",
+  "content": """
+  You are a grounding checker for a RAG system.
+
+  Your job is to determine whether the context supports a faithful answer to the user's question.
+
+  You must first identify the answer that is explicitly supported by the context, then decide whether it answers the user's question.
+
+  The answer is answerable ONLY if the context explicitly states:
+  - the requested value
+  OR
+  - an explicit negation of the user's premise.
+
+  Do NOT infer exclusivity, default business logic, or unstated policy implications.
+  """
+}
+```
+We also introduced hard gating for questions marked as not answerable by the grounding checker. This hard gating strategy prevents unsupported fallback generation when the grounding checker determines that the retrieved context is insufficient.
+
+```python
+ if grounding_response is None:
+    return "I don't know", result, grounding_response
+    
+if not grounding_response.answerable:
+    return "I don't know", result, grounding_response
+```
+
+Below is the evaluation summary of iteration 3.1:
+```json
+{
+  "total_cases": 23,
+  "without_grounding": {
+    "should_abstain_but_answered_rate": 0.0,
+    "false_abstain_rate": 0.08695652173913043
+  },
+  "with_grounding": {
+    "should_abstain_but_answered_rate": 0.043478260869565216,
+    "false_abstain_rate": 0.0
+  },
+  "comparison": {
+    "should_abstain_but_answered_delta": 1,
+    "false_abstain_delta": -2,
+    "grounding_correct_rate": 0.9565217391304348
+  }
+}
+
+```
+Result shows that the stricter grounding prompt and hard gating strategy successfully eliminated false abstain cases introduced in iteration 3.
+
+However, evaluation also revealed that grounding-based answerability reasoning may still introduce unsupported inference in certain edge cases, especially when the model implicitly infers unstated business logic from partially related context.
+
+This highlights an important tradeoff between:
+- reducing false abstain behavior
+- and maintaining strict groundedness
+
+The final grounding_correct_rate reached 95.65%.
 
 
 ---
