@@ -59,7 +59,6 @@ def main():
                 continue
 
         reply, rag_result, grounding_response = generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve_mode, generation_mode)
-        answerable = grounding_response.answerable
 
         if reply is None:
             # rollback没成功的用户问题
@@ -186,32 +185,34 @@ def generate_reply(user_input, knowledge, embedded_knowledge, messages, retrieve
     elif retrieve_mode == config.RETRIEVE_MODE_EMBEDDING:
         result = rag.retrieve_embedding(user_input, embedded_knowledge, config.TOPK, gating)
     
-    fallback_to_llm = True
     grounding_response = None
-    
-    if result["use_rag"]: # routing
-        if generation_mode == config.GENERATION_MODE_RELEVANCE:
-            # if relevant --> use RAG
-            fallback_to_llm = False
-            rag_prompt = build_rag_messages(result, user_input)
-            response = llm.call_llm(messages + rag_prompt)
 
-        elif generation_mode == config.GENERATION_MODE_GROUNDING:
-            grounding_prompt = build_grounding_prompt(result, user_input)
-            grounding_response = llm.call_llm_structured_output(messages + grounding_prompt)
-
-            # if answerable --> use RAG
-            if grounding_response is not None and grounding_response.answerable == True:
-                fallback_to_llm = False
-                rag_prompt = build_rag_messages_grounding(result, user_input, grounding_response)
-                response = llm.call_llm(messages + rag_prompt)
-
-    # fallback to llm mode when RAG is not available
-    if fallback_to_llm == True:
+    # Case 1: retrieval says no relevant context from knowledge base
+    if not result["use_rag"]:
         user_messages = [
             {"role": "user", "content": user_input}
         ]
         response = llm.call_llm(messages + user_messages)
+        return response, result, grounding_response
+    
+    # Case 2: relevance mode without grounding
+    if generation_mode == config.GENERATION_MODE_RELEVANCE:
+        rag_prompt = build_rag_messages(result, user_input)
+        response = llm.call_llm(messages + rag_prompt)
+
+    # Case 3: grounding mode
+    if generation_mode == config.GENERATION_MODE_GROUNDING:
+        grounding_prompt = build_grounding_prompt(result, user_input)
+        grounding_response = llm.call_llm_structured_output(messages + grounding_prompt)
+
+        if grounding_response is None:
+            return "I don't know", result, grounding_response
+    
+        if not grounding_response.answerable:
+            return "I don't know", result, grounding_response
+
+        rag_prompt = build_rag_messages_grounding(result, user_input, grounding_response)
+        response = llm.call_llm(messages + rag_prompt)
 
     return response, result, grounding_response
 
@@ -227,14 +228,14 @@ def build_grounding_prompt(result, user_input):
 
             Your job is to determine whether the context supports a faithful answer to the user's question.
 
-            You must first identify the answer that is supported by the context, then decide whether it answers the user's question.
+            You must first identify the answer that is explicitly supported by the context, then decide whether it answers the user's question.
 
-            Important:
-            - A faithful answer can be affirmative or negative.
-            - Negative answers are valid answers.
-            - If the user asks for a value such as time, price, availability, permission, eligibility, or existence, and the context says it is unavailable, closed, not allowed, not eligible, unsupported, absent, or does not exist, then the question is answerable with a negative answer.
-            - Do not require the context to contain the exact type of value requested if the context clearly negates the premise of the question.
-            - Do not use outside knowledge.
+            The answer is answerable ONLY if the context explicitly states:
+            - the requested value
+            OR
+            - an explicit negation of the user's premise.
+
+            Do NOT infer exclusivity, default business logic, or unstated policy implications.
             """
         },
         {
@@ -291,6 +292,17 @@ def build_grounding_prompt(result, user_input):
             "reason": "The context does not provide shipping options for members.",
             "evidence": ""
             }}
+
+            Question: Do non-members get 10% discount?
+            Context: Membership Policy: Members get a 10% discount.
+            Output:
+            {{
+            "answerable": false,
+            "answer_type": "not_answerable",
+            "supported_answer": "",
+            "reason": "The policy says members get a 10% discount, but it does not explicitly state whether non-members receive any discount.",
+            "evidence": ""
+            }}
             """
         }]
 
@@ -300,7 +312,7 @@ def build_rag_messages_grounding(result, user_input, grounding_response):
     prompt = [{
         "role": "user",
         "content": f"""
-        Use the provided knowledge to answer the user's question.
+        Use the provided knowledge to answer user's question.
 
         A grounding checker has already identified a supported answer.
 
