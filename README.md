@@ -1,469 +1,388 @@
-# AI Conversational Assistant with Memory, Safety & Hybrid RAG
+# RAG Chatbot with Grounding Validation, Memory & Evaluation Framework
 
 ## Overview
-This project is a CLI-based conversational assistant powered by the OpenAI API.
+Built a production-minded RAG chatbot with hybrid memory, grounding validation, and evaluation pipelines. 
 
-It supports multi-turn dialogue with hybrid memory (short-term + summarized long-term), 
-a lightweight Retrieval-Augmented Generation (RAG) pipeline with answer grounding checker and a structured evaluation framework for analyzing system performance.
+The system evolved through three major iterations: keyword retrieval, embedding retrieval, and grounding-aware generation. Evaluation pipelines were used throughout the project to analyze retrieval quality, answerability, abstention behavior, and hallucination rates. 
 
-The system follows a **hybrid answering strategy**:
-- When relevant knowledge is retrieved, if responses are grounded by grounding checker (powered by LLM), then use RAG
-  
-- Otherwise, the system falls back to the base LLM
+### Key Findings
+- Embedding retrieval significantly outperformed keyword retrieval.
+- Retrieval relevance does not imply answerability.
+- Higher retrieval thresholds reduced retrieval coverage and increased hallucination through LLM fallback.
+- Answerability and answer grounding are distinct problems that require separate evaluation.
 
-In addition, the project includes an **evaluation pipeline** that measures system performance across routing, retrieval, and generation, enabling systematic failure analysis and iterative improvement.
+**A central insight from this project is that retrieval relevance and answerability are fundamentally different concepts.** A retrieved document may be semantically relevant to a query while still lacking sufficient information to answer it faithfully.
 
----
+### Architecture Diagram
+```text
+User Query
+     │
+     ▼
+ Retrieval
+     │
+     ▼
+ Grounding Validation
+     │
+     ▼
+ Answerable?
+ ┌───┴────┐
+ │        │
+Yes       No
+ │        │
+ ▼        ▼
+ RAG     I don't know
+     │
+     ▼
+  Response
+     │
+     ▼
+ Runtime Trace
 
-## Key Features
-
-- Multi-turn conversation with LLM
-- Hybrid memory (short-term + long-term summarized memory)
-- Retrieval-Augmented Generation (RAG) with keyword-based and embedding-based retrieval (iteration II)  
-- Answer Grounding Checker with structured output (iteration III)  
-- Threshold-based RAG gating (dynamic routing between RAG and LLM)
-- Hybrid answering strategy (grounded + fallback responses)
-- Rule-based safety filtering
-- Observability via structured trace logging (JSONL)
-
-### Evaluation & Analysis
-- Structured evaluation dataset with labeled ground truth
-- Per-case evaluation (routing, retrieval, generation)
-- Failure taxonomy (gating, retrieval, abstention, hallucination)
-- Aggregate metrics (accuracy, recall, abstain behavior)
-- Failure breakdown analysis for system debugging
-
----
-
-## System Design
-
-### 1. Chat Message Schema
-
-```json
-{
-  "role": "system",
-  "content": "Instructions, rules, and context"
-},
-{
-  "role": "system",
-  "content": "Summarized long-term conversation memory"
-},
-{
-  "role": "user",
-  "content": "User input"
-},
-{
-  "role": "assistant",
-  "content": "Model response"
-}
+──────────────────
+Golden Dataset
+      │
+      ▼
+ Evaluation Pipeline
+      │
+      ▼
+ Failure Analysis
 ```
 
-- The first system message defines the assistant’s global behavior, safety rules, and response constraints.  
-- The second system message stores summarized long-term memory from earlier conversation turns.  
-- Recent user/assistant messages are kept as short-term memory for local conversational context.
+## Motivation
+Traditional RAG systems typically assume that retrieving relevant documents is sufficient for generating correct answers.
 
----
+However, during development I observed that retrieval relevance and answerability are fundamentally different concepts. A retrieved document may be semantically relevant to a query while still lacking enough information to answer it faithfully.  
 
-### 2. Conversation Flow
-
-User Input  
-→ Input Validation & Safety Filtering  
-→ Retrieval, Gating & Grounding (routing RAG or LLM path)  
-→ Prompt Construction (inject RAG context if applicable)  
-→ LLM Inference  
-→ Update Conversation State (append user & assistant messages)    
-→ Context Window Management  
-→ Optional Summarization  
-→ Observability Logging (structured trace)  
-
----
-
-### 3. Retrieval-Augmented Generation (RAG)
-
-The system supports two retrieval strategies:
-
-- **Keyword-based retrieval (Iteration I)**
-  - Uses token overlap for scoring
-  - Sensitive to query phrasing, typos, and lexical variation
-
-- **Embedding-based retrieval (Iteration II)**
-  - Uses semantic similarity (cosine similarity on embeddings)
-  - More robust to paraphrasing and natural language variation
-- **Embedding-based retrieval + Answer Grounding (Iteration III)**
-  - Uses LLM-as-Judege to ground answerability of user question
-  - If judge identifies question answerable, then proceed with RAG mode; otherwise, fallback to LLM mode
-
-All above iterations share a unified RAG pipeline:
-
-- Top-k chunks are retrieved from the knowledge base  
-- A relevance gating mechanism determines whether to trigger RAG  
-- Retrieved context is injected into the prompt when RAG is enabled  
-
----
-
-#### Key Insight
-
-**Relevancy and answerable are fundementally different concepts**
-
-Evaluation across iterations reveals three distinct stages:
+For example:
 
 ```text
-relevance → retrieval → answerability
+Question:
+Do non-members get a 10% discount?
+
+Retrieved Document:
+Members get a 10% discount.
+
+Expected Answer:
+I don't know.
 ```
 
----
+The retrieved document is highly relevant. However, it does not contain enough information to answer the user's question.  
 
-### 4. Hybrid Answering Strategy
+LLM may incorrectly infer that non-members receive no discount, even though this information is not present in the knowledge base.
 
-The system dynamically routes responses based on retrieval confidence:
+To better understand this problem, the system evolved through multiple retrieval and grounding strategies, each evaluated using a dedicated benchmarking pipeline.
 
-- **RAG mode (`mode="rag"`)**
-  - Triggered when retrieval score exceeds threshold
-  - Provides grounded responses using external knowledge
+## System Evolution
+### Iteration I - Keyword-Based Retrieval
+The first version of the system used a simple keyword-overlap retrieval strategy.  
 
-- **Fallback mode (`mode="llm"`)**
-  - Triggered when retrieval confidence is low
-  - Allows general reasoning but may introduce hallucination risk
+Query keywords and document keywords were compared using overlap ratios, and the highest-ranked chunks were passed to the language model as retrieval context.  
 
----
+```text
+User Query 
+    ↓ 
+Keyword Matching 
+    ↓ 
+Top-K Chunks 
+    ↓ 
+LLM Response
+```
+A retrieval threshold determined whether retrieved knowledge was sufficiently relevant. If the threshold was not met, the system fell back to standard LLM generation.  
 
-### 5. Memory Management
+### Findings
+Keyword retrieval served as a useful baseline due to its simplicity and interpretability. However, it struggled with typos, paraphrasing, and semantically similar questions that shared few keywords with the knowledge base.
 
-#### Hybrid Memory Design
-
-- Short-term memory: recent conversation messages  
-- Long-term memory: summarized history stored as system message  
-
-#### Summarization Strategy
-
-- Triggered when context window length exceeds threshold  
-- Only intermediate messages are summarized  
-- Most recent messages are preserved for recency  
-- **Fallback**: if summarization fails, the system degrades to keeping only the most recent messages
-
-#### Optimization
-
-- Limit repeated summarization of existing summaries to mitigate cumulative information loss  
-- Preserve important context while reducing token usage  
+These limitations motivated the next iteration: embedding-based retrieval.
 
 ---
 
-### 6. Failure Handling
+### Iteration II - Embedding-Based Retrieval
+To improve retrieval quality, the second iteration replaced keyword matching with embedding-based semantic retrieval.  
 
-- LLM API failure → continue chat loop  
-- Summarization failure → fallback to truncated recent history  
+Knowledge chunks were converted into vector embeddings. For each user query, an embedding was generated and compared against all knowledge vectors using cosine similarity.  
 
----
+The system ranked documents by semantic similarity and returned the top-k chunks as retrieval context.  
 
-### 7. Observability (Trace Logging)
+A configurable similarity gating threshold was used to determine whether retrieved knowledge should be included in generation.  
 
-Each interaction is logged as structured JSON (JSONL format):
+Gating threshold tuning revealed an important trade-off: **overly strict thresholds reduced retrieval coverage and increased hallucinations** through LLM fallback generation. 
 
-```json
-{
-  "query": "...",
-  "retrieval": {
-    "use_rag": true,
-    "top_chunks": [...],
-    "top_chunk": ...
-    "top_scores": [...],
-    "top_score": ...
-    "threshold": ...
-  },
-  "response": {
-    "reply": "...",
-    "mode": "rag"
-  },
-  "grounding":{
-    "answerable": true/false,
-    "supported_answer": "...",
-    "answer_type": ["direct", "negative", "partial", "not_answerable"],
-    "reason": "...",
-    "evidence": "..."
-  }
-  "error": "..."
-}
+```text
+User Query
+    ↓
+Embedding
+    ↓
+Cosine Similarity
+    ↓
+Top-K Chunks
+    ↓
+Gating Threshold
+       │
+ ┌─────┴─────┐
+ │           │
+Use RAG?     No
+ │           │
+ ▼           ▼
+RAG      LLM Only
 ```
 
-This enables:
-- Debugging retrieval quality  
-- Analyzing model behavior  
-- Supporting manual and automated evaluation  
+### Evaluation
+To measure the impact of semantic retrieval, a golden evaluation dataset was created to compare keyword retrieval and embedding retrieval.  
+
+Metrics included:
+- Top-1 Retrieval Accuracy
+- Top-k Recall
+- Gating Accuracy
+
+The evaluation framework enabled per-case analysis and failure categorization, making retrieval behavior observable beyond final answer quality.
+
+### Findings
+Embedding retrieval significantly outperformed keyword retrieval across retrieval accuracy and recall metrics. Semantic retrieval achieved nearly 100% Top-1 retrieval accuracy and Top-K recall.
+
+Semantic retrieval was more robust to:
+
+- Paraphrased questions
+- Different wording
+- Minor spelling variations
+
+However, a new problem emerged during evaluation:  
+
+Although embedding retrieval successfully identified semantically relevant documents, some retrieved documents still lacked sufficient information to answer the user's question.  
+ 
+This observation revealed a key limitation of retrieval-based systems: **retrieval relevance does not necessarily imply answerability**. This insight motivated the next iteration: grounding validation.
 
 ---
 
-### 8. Evaluation - Pipeline Workflow  
-→ Load evaluation dataset `eval_data.jsonl` (expected behaviors with gold answers, etc)  
-→ Generate model response (actual behaviors)  
-→ Perform per-case evaluation  
-→ Generate evaluation report `eval_report.jsonl` (JSONL with structured metrics and failure types)  
-→ Metrics Aggregation  
+### Iteration III - Grounding Validation
+To address the answerability gap discovered in Iteration II, a grounding validation layer was introduced between retrieval and generation.
 
----
-### 9. Evaluation - Failure Analysis
+### Design
+The grounding validator determines whether the retrieved context contains sufficient evidence to answer the user's question.
 
-We categorize failures into three stages: **routing, retrieval, and generation**.  
-This taxonomy helps isolate failures across different stages of the RAG pipeline, enabling targeted debugging and system improvement.
+Only answerable queries proceed to generation. Otherwise, falls back to LLM generation.
 
-- **Routing (Gating)**
-  - `GATING_FALSE_POSITIVE`: KB is not relevant but RAG is triggered  
-  - `GATING_FALSE_NEGATIVE`: KB is relevant but RAG is not triggered  
-
-- **Retrieval (Recall)**
-  - `TOPK_RECALL_FAILED`: Gold chunk is not present in top-k results  
-
-- **Grounding / Abstention**
-  - `SHOULD_ABSTAIN_BUT_ANSWERED`: Hallucination (answer without support)  
-  - `SHOULD_ANSWER_BUT_ABSTAINED`: False abstention (missed answer)  
-
-- **Answer Correctness**
-  - `answer_correct`: correctness of final answer (manual labeling; LLM-as-judge planned)
-
----
-### 10. Evaluation - System Evolution
-
-#### Iteration I: Keyword-based Retrieval (Baseline)
-
-Keyword-based retrieval reveals several limitations:  
-
-- Gating false negatives due to low lexical overlap  
-- Sensitivity to query phrasing and typos  
-- Imperfect **top-k recall** and **top-1 ranking issue**    
-
-Example failure:
-- “what about Satuarday?” → gating fails due to spelling variation  
-- “how long does delivery usually take?” → top-1 ranking issue
-
-**Conclusion:**
-> The main bottleneck in Iteration I is retrieval quality and gating sensitivity.
-
----
-
-#### Iteration II: Embedding-based Retrieval
-
-Replacing keyword retrieval with embedding-based semantic retrieval leads to:
-
-- Top-1 accuracy ≈ 1.0  
-- Top-k recall ≈ 1.0  
-- Gating accuracy significantly improved  
-
-This effectively resolves retrieval-related failures.
-
---- 
-
-#### Embedding-based Retrieval Threshold Tuning
-
-We performed a simple threshold sweep on the embedding-based retrieval system. Gating threshold ranges from [0.3, 0.35, 0.4, 0.45]
-
-Results show:
-
-- Lower threshold 0.3 achieves the best overall performance  
-- Higher thresholds introduce more gating false negatives  
-- At high threshold 0.45, hallucination starts to appear due to increased fallback to LLM  
-
-Interestingly, false abstention remains constant across thresholds, indicating that:
-
-> the remaining errors are not caused by retrieval or gating, but by generation limitations.
-
----
-
-**Conclusion:**  
-We ended up selecting `gating_threshold = 0.3` as it provides the best tradeoff between recall and hallucination.
-
----
-
-#### Case review
-
-In this case, the system correctly identifies the relevant knowledge and triggers RAG. However, the model still responds with *"I don't know."*.
-
-This illustrates an important limitation:
-
-> **Relevance does not guarantee answerability.**
-
-Although the retrieved chunk is highly relevant, the answer is not explicitly stated in the knowledge base and requires simple reasoning (e.g., negation). Due to strict grounding constraints, the model abstains instead of answering.
-
-This type of failure motivates the next iteration, where we will introduce **LLM-based answer grounding / answerability checks** to better handle implicitly answerable queries.
-
-```json
-{
-  "query": "can customer return items without a receipt ?", 
-  "retrieval": {
-    "mode": "embedding", 
-    "threshold": 0.3, 
-    "use_rag": true, 
-    "top-k": 2, 
-    "top_chunks": ["Return Policy: Customers can return items within 7 days with a receipt.", "Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed."], "top_scores": [0.6268515496496546, 0.23584901986657547], 
-    "top1_chunk": "Return Policy: Customers can return items within 7 days with a receipt.", 
-    "top1_score": 0.6268515496496546, 
-    "top2_chunk": "Business Hours: Monday to Friday open at 9am and close at 8pm. Saturday open at 8am and close at 6pm. Sunday closed.", 
-    "top2_score": 0.23584901986657547, 
-    "top1_top2_gap": 0.39100252978307914
-    }, 
-  "response": {
-    "reply": "I don't know.", 
-    "mode": "rag"
-    }, 
-  "error": null
-}
-```
----
-
-#### Iteration III: Answer Grounding Checker  
-Iteration II revealed an important issue:
-
-> relevance != answerability  
-
-Even when retrieved knowledge is relevant to the query, the knowledge base may still not contain enough information to answer the question correctly.
-
-To address this issue, we introduced an **answer grounding checker** to verify:
-
-> Given the retrieved knowledge, is this question truly answerable from the KB?
-
-We conducted a side-by-side evaluation between:  
-- iteration II (embedding RAG without grounding)
-- iteration III (with grounding). Below are the evaluation results:  
-
-```json
-{
-  "total_cases": 22,
-  "without_grounding": {
-    "should_abstain_but_answered_rate": 0.0,
-    "false_abstain_rate": 0.09090909090909091
-  },
-  "with_grounding": {
-    "should_abstain_but_answered_rate": 0.18181818181818182,
-    "false_abstain_rate": 0.0
-  },
-  "comparison": {
-    "should_abstain_but_answered_delta": 4,
-    "false_abstain_delta": -2,
-    "grounding_correct_rate": 0.7727272727272727
-  }
-}
-```
-Results show that introducing the grounding checker successfully reduced the `false_abstain_rate` to zero. The system became more willing to answer questions when sufficient KB evidence existed.
-
-However, the evaluation also revealed a new issue:
-
-> unsupported answer / hallucination rate increased significantly
-
-The grounding checker sometimes incorrectly interpreted **non-mentioned information** as a **negative answer**.
-
-Expected behavior is "I don't know". This indicates that the current answer grounding checker is still somehow **over-confident** when handling non-mentioned information.
-
-```json
-{
-  "query": "can customers return items broken ?",
-  "retrieve_mode": "embedding",
-  "expected": {
-    "relevant": true,
-    "answerable": false,
-    "gold_answer": "I don't know."
-  },
-  "with_grounding": {
-    "answerable": true,
-    "reply": "Customers cannot return broken items as there is no mention of returning broken items in the return policy.",
-    "abstained": false,
-    "should_abstain_but_answered": true,
-    "should_answer_but_abstained": false
-  },
-  "without_grounding": {
-    "reply": "I don't know.",
-    "abstained": true,
-    "should_abstain_but_answered": false,
-    "should_answer_but_abstained": false
-  },
-  "comparison": {
-    "grounding_correct": false,
-    "grounding_reduced_unsupported_answer": false,
-    "grounding_caused_false_abstain": false
-  }
-}
-```
----
-
-#### Iteration 3.1: Answer Grounding Prompt Adjustment
-We updated the answer grounding prompt to as follows:
-```json
-{
-  "role": "system",
-  "content": """
-  You are a grounding checker for a RAG system.
-
-  Your job is to determine whether the context supports a faithful answer to the user's question.
-
-  You must first identify the answer that is explicitly supported by the context, then decide whether it answers the user's question.
-
-  The answer is answerable ONLY if the context explicitly states:
-  - the requested value
-  OR
-  - an explicit negation of the user's premise.
-
-  Do NOT infer exclusivity, default business logic, or unstated policy implications.
-  """
-}
-```
-We also introduced hard gating for questions marked as not answerable by the grounding checker. This hard gating strategy prevents unsupported fallback generation when the grounding checker determines that the retrieved context is insufficient.
-
-```python
- if grounding_response is None:
-    return "I don't know", result, grounding_response
-    
-if not grounding_response.answerable:
-    return "I don't know", result, grounding_response
+```text
+User Query 
+    ↓ 
+Embedding Retrieval 
+    ↓ 
+Grounding Validation 
+    ↓ 
+Answerable? 
+┌───┴────┐ 
+│        │ 
+Yes      No 
+│        │ 
+▼        ▼ 
+Answer  LLM Generation
 ```
 
-Below is the evaluation summary of iteration 3.1:
-```json
-{
-  "total_cases": 23,
-  "without_grounding": {
-    "should_abstain_but_answered_rate": 0.0,
-    "false_abstain_rate": 0.08695652173913043
-  },
-  "with_grounding": {
-    "should_abstain_but_answered_rate": 0.043478260869565216,
-    "false_abstain_rate": 0.0
-  },
-  "comparison": {
-    "should_abstain_but_answered_delta": 1,
-    "false_abstain_delta": -2,
-    "grounding_correct_rate": 0.9565217391304348
-  }
-}
+### Evaluation
+Grounding validation was evaluated against direct generation using:  
+- Grounding Accuracy
+- Unsupported Answer Rate
+- False Abstention Rate
 
+### Findings
+The initial grounding validation implementation did not behave as expected. While grounding validation reduced false abstentions, it also increased unsupported answers in some cases.  
+
+```text
+Example:
+
+Query:
+Can customers return broken items?
+
+Retrieved Document:
+(return policy does not mention broken items)
+
+Expected:
+I don't know.
+
+Actual:
+Customers cannot return broken items because the return policy does not mention returning broken items.
 ```
-Result shows that the stricter grounding prompt and hard gating strategy successfully eliminated false abstain cases introduced in iteration 3.
+The evaluation revealed that unsupported queries could still reach the language model through fallback generation, leading to unsupported answers.
 
-However, evaluation also revealed that grounding-based answerability reasoning may still introduce unsupported inference in certain edge cases, especially when the model implicitly infers unstated business logic from partially related context.
+In addition, the grounding validator sometimes treated missing information as evidence for a negative answer.
 
-This highlights an important tradeoff between:
-- reducing false abstain behavior
-- and maintaining strict groundedness
+> Not mentioned != Not Allowed
 
-The final grounding_correct_rate reached 95.65%.
+This failure revealed that a retrieved document can be highly relevant to a query while still lacking enough information to answer it faithfully.  
 
-
----
-
-## Why This Design?
-
-- Prevents context explosion  
-- Controls latency and token cost  
-- Improves response grounding  
-- Enables system observability and evaluation  
-- Supports iterative improvement (RAG, prompt, memory)  
+The issue motivated the next iteration: grounding prompt refinement.
 
 ---
+
+### Iteration III.1 - Grounding Prompt Refinement
+The evaluation from Iteration III revealed that the grounding validator sometimes treated missing information as evidence for a negative answer.  
+
+To address this issue, the grounding prompt was refined to enforce a stricter definition of answerability.  
+
+### Design
+The updated grounding validator was instructed to:
+
+- identify information explicitly supported by the retrieved context
+- distinguish unsupported questions from negative answers
+- avoid inferring unstated policies or business rules
+- treat missing information as unanswerable rather than false
+
+A key rule added to the prompt was:
+
+**The answer is answerable only if the context explicitly provides the requested information or explicitly contradicts the user's premise.** 
+
+In addition, a hard gating mechanism was introduced.  
+
+If the grounding validator determined that a question was not answerable from the retrieved context, the system immediately returned: I don't know, instead of allowing fallback LLM generation.
+
+This design prevents the language model from generating unsupported conclusions when sufficient evidence is unavailable.
+
+```text
+User Query 
+    ↓ 
+Embedding Retrieval 
+    ↓ 
+Grounding Validation 
+    ↓ 
+Answerable? 
+┌───┴────┐ 
+│        │ 
+Yes      No 
+│        │ 
+▼        ▼ 
+Answer  I don't know
+```
+
+###  Evaluation
+The updated grounding validator was evaluated using the same benchmark dataset and same metrics from Iteration III.  
+
+### Findings
+Prompt refinement successfully distinguished answerable and unanswerable queries on the evaluation dataset.  
+
+Compared with direct generation, grounding validation provided two major benefits:
+
+- The grounding validator became more conservative when handling missing information and was less likely to interpret "not mentioned" as a negative answer.
+- Reduced false abstentions by helping the model recognize when retrieved context contained sufficient information to answer the question.
+
+```text
+Example 1:  
+query: Do non-members get a 10% discount?
+document: Members get a 10% discount.
+```
+
+Without grounding, the model incorrectly inferred that non-members do not receive the discount, even though the retrieved document never stated this information. With grounding validation, the system correctly abstained because the retrieved evidence did not answer the question.
+
+```text
+Example 2:
+query: can customer return items without a receipt?
+document: Customers can return items within 7 days with a receipt. 
+```
+Without grounding, the model abstained despite having sufficient evidence to answer the question. With grounding validation, the system correctly identified the query as answerable and generated a supported answer.  
+
+### Conclusion
+
+These results reinforced the central insight of the project:
+
+**Retrieval relevance does not imply answerability.**
+
+A retrieved document may be highly relevant to a user's question while still lacking sufficient evidence to answer it faithfully. Grounding validation helps bridge this gap by explicitly validating answerability before generation.
+
+
+## Evaluation Framework
+To make system behavior measurable, a dedicated evaluation pipeline was built around golden datasets and per-case evaluation. 
+
+### Design
+Each evaluation case defines an expected system behavior, including retrieval relevance, answerability, abstention behavior, and expected responses.  
+
+Each evaluation runner compares actual system outputs against expected results defined in the golden dataset.
+
+Different evaluation runners were created for different experiments, including:
+
+- Keyword Retrieval vs Embedding Retrieval
+- Retrieval Threshold Tuning
+- Direct Generation vs Grounding Validation
+
+Below is the architecture of an evaluation runner:
+```text
+Golden Dataset 
+      │ 
+      ▼ 
+generate_reply()
+      │ 
+      ▼ 
+Actual Result 
+      │ 
+      ▼ 
+Per-Case Comparison
+      │ 
+      ▼ 
+Evaluation Summary
+```
+### Benefits
+The evaluation framework made failure modes observable and enabled systematic comparison across different retrieval and grounding strategies. Several key findings throughout the project emerged directly from this framework.
+
+
+## Hybrid Memory System
+To support long-running conversations while keeping context size bounded, a hybrid memory architecture was implemented.  
+
+### Design
+The memory system combines:
+
+- Short-Term Memory: the most recent N conversation turns
+- Long-Term Memory: an incrementally updated conversation summary
+
+When older conversations fall outside the short-term memory window, a conversation delta is generated and merged into the existing summary.  
+
+This approach keeps the context window size approximately constant regardless of conversation length.
+
+```text
+                    Conversation History
+                             │
+        ┌────────────────────┴───────────────────┐
+        │                                        │
+        ▼                                        ▼
+ Recent N Dialogs                           Older Dialogs
+        │                                        │
+        ▼                                        ▼
+ Short-Term Memory                    Conversation Delta
+                                                 │
+                                                 ▼
+                                          Old Summary
+                                                 │
+                                                 ▼
+                                          Summary Merge
+                                                 │
+                                                 ▼
+                                          Long-Term Memory
+                                                 │
+                        ┌────────────────────────┘
+                        │
+                        ▼
+                Final Prompt Context
+```
+
+### Benefits
+The hybrid design enables long-running conversations while keeping context size bounded.
+
+By combining recent dialogue history with a compact long-term summary, the system can retain important conversational context without unbounded growth.
+
+### Limitation
+The primary trade-off is *Information loss*. As conversations are repeatedly compressed into summaries, details may gradually disappear or become less precise over time.  
+
+This represents a common trade-off in summary-based memory systems: **the ability to support longer conversations comes at the cost of gradual information loss**.
+
 
 ## Future Improvements
-
-### Iteration III: Answer Quality & Grounding
-- Introduce LLM-as-judge to evaluate answer groundedness  
-- Add structured output using JSON schema
-- Add answer verification to reduce unsupported or hallucinated responses
-
-### Additional Improvements
-- Improve safety filtering with LLM-based classification
+### Retrieval
 - Add reranking to improve top-1 relevance
-- Build a UI, such as Streamlit, for easier interaction and demo
+- Introduce vector database for larger knowledge bases
+
+### Grounding & Answerability
+- Separate answerability detection from answer grounding so the system first determines whether the retrieved context contains enough information to answer, then independently verifies whether the generated answer is fully supported by evidence.
+
+### Memory
+- Reduce information loss in long-term summaries
+- Explore retrieval-augmented memory for preserving detailed historical context
+
+### Productization
+- Build a Streamlit UI
+- Add persistent storage and user profiles
